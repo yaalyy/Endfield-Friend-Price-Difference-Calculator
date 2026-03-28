@@ -74,9 +74,13 @@
                 <tr>
                     <td>基础价格</td>
                     <td v-for="item in products">
-                        <input type="number" v-model.number="item.basePrice" @change="saveProducts">
+                        <!-- <input type="number" v-model.number="item.basePrice" @change="saveProducts"> -->
+                         2000
                     </td>
-                    <td><input type="number" v-model.number="newProduct.basePrice" placeholder="基础价格"></td>
+                    <td>
+                        <!-- <input type="number" v-model.number="newProduct.basePrice" placeholder="基础价格"> -->
+                         2000
+                    </td>
                 </tr>
                 <tr>
                     <td>折扣比(%)</td>
@@ -158,7 +162,7 @@
             data() {
                 return {
                     products: [],
-                    newProduct: { name: '', basePrice: 0, discount: 0 },
+                    newProduct: { name: '', basePrice: 2000, discount: 0 },
                     friends: [],
                     newFriend: { name: '', discounts: {} },
                 }
@@ -202,9 +206,9 @@
                     return item.basePrice * (1 + item.discount / 100);
                 },
                 addProduct() {
-                    if (!this.newProduct.name || !this.newProduct.basePrice) return;
+                    if (!this.newProduct.name) return;
                     this.products.push({ ...this.newProduct });
-                    this.newProduct = { name: '', basePrice: 0, discount: 0 };
+                    this.newProduct = { name: '', basePrice: 2000, discount: 0 };
                     this.saveProducts();
                 },
                 removeProduct(index) {
