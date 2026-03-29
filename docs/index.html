@@ -248,7 +248,7 @@
                     localStorage.setItem('friends', JSON.stringify(this.friends));
                 },
                 calcPrice(item, discount) {
-                    return item.basePrice * (1 + (discount || 0) / 100);
+                    return item.basePrice * (1 + item.discount / 100) * (1 + (discount || 0) / 100);
                 },
                 getCellClass(value) {
                     if (value > 0) return 'red';
