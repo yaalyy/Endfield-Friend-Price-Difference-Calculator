@@ -168,13 +168,14 @@
         const { createApp } = Vue;
         createApp({
             data() {
+                const defaultBasePrice = 2000; 
                 return {
                     products: [],
-                    newProduct: { name: '', basePrice: this.basePrice, discount: 0 },
+                    newProduct: { name: '', basePrice: defaultBasePrice, discount: 0 },
                     friends: [],
                     newFriend: { name: '', discounts: {} },
                     quantity: 1,
-                    basePrice: 2000,  // 统一基础价格，方便后续修改和扩展
+                    basePrice: defaultBasePrice,  // 统一基础价格，方便后续修改和扩展
                 }
             },
             mounted() {
