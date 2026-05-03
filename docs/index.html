@@ -74,6 +74,19 @@
             font-weight: bold;
             background-color: #ffd700;
         }
+
+        .product-header {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .delete-product-btn {
+            margin-left: 0;
+            color: #b22222;
+            border-color: #b22222;
+        }
     </style>
 </head>
 
@@ -82,15 +95,18 @@
         <h2 style="text-align: center;">终末地商品收益计算工具</h2>
         <div style="margin-bottom: 15px; text-align: center;">
             <label for="quantity">商品数量:</label>
-            <input id="quantity" type="number" v-model.number="quantity" @change="saveQuantity" style="border: 1px solid #AAA; width: 80px; height: 26px;">
+            <input id="quantity" type="number" v-model.number="quantity" style="border: 1px solid #AAA; width: 80px; height: 26px;">
         </div>
         <div class="table-responsive">
             <table>
                 <thead>
                     <tr>
                     <th>商品名</th>
-                    <th v-for="item in products">
-                        <input type="text" v-model.number="item.name" @change="saveProducts">
+                    <th v-for="(item, index) in products">
+                        <div class="product-header">
+                            <input type="text" v-model="item.name">
+                            <button class="delete-product-btn" @click="removeProduct(index)">删除</button>
+                        </div>
                     </th>
                     <th><input v-model="newProduct.name" placeholder="商品名"></th>
                 </tr>
@@ -143,7 +159,7 @@
                 <template v-for="(friend, fIndex) in friends" :key="fIndex">
                     <tr>
                         <td rowspan="3">
-                            <input v-model="friend.name" @change="saveFriends">
+                            <input v-model="friend.name">
                         </td>
                         <td v-for="item in products" :class="getCellClass(friend.discounts[item.name])">
                             <input type="number" v-model.number="friend.discounts[item.name]"> %
@@ -236,6 +252,23 @@
                     };
                 }
             },
+            watch: {
+                products: {
+                    handler() {
+                        this.saveProducts();
+                    },
+                    deep: true
+                },
+                friends: {
+                    handler() {
+                        this.saveFriends();
+                    },
+                    deep: true
+                },
+                quantity() {
+                    this.saveQuantity();
+                }
+            },
             methods: {
                 // 计算单个物品的实际价格
                 ownPrice(item) {
@@ -248,8 +281,17 @@
                     this.saveProducts();
                 },
                 removeProduct(index) {
+                    const removedProduct = this.products[index];
+                    if (!removedProduct) return;
+
                     this.products.splice(index, 1);
+                    this.friends.forEach(friend => {
+                        delete friend.discounts[removedProduct.name];
+                    });
+                    delete this.newFriend.discounts[removedProduct.name];
+
                     this.saveProducts();
+                    this.saveFriends();
                 },
                 saveProducts() {
                     const toSave = this.products.map(p => ({ name: p.name, basePrice: p.basePrice, discount: p.discount }));
