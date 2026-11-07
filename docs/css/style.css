@@ -122,7 +122,9 @@ tbody tr.selected { background: #f1f1ff; box-shadow: inset 3px 0 0 var(--primary
 .diff { color: var(--positive); font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
 .pill { display: inline-block; padding: 4px 8px; border-radius: 99px; font-size: 12px; font-weight: 700; white-space: nowrap; }
 .pill.profit { color: var(--positive); background: var(--positive-soft); }
-.pill.discount { color: var(--teal); background: var(--teal-soft); }
+.pill.discount { color: var(--muted); background: var(--surface-subtle); }
+.pill.discount.red { color: var(--positive); background: var(--positive-soft); }
+.pill.discount.green { color: var(--teal); background: var(--teal-soft); }
 .row-actions { display: flex; justify-content: flex-end; gap: 4px; }
 .icon-button { width: 30px; height: 30px; border-color: transparent; color: #62697c; background: transparent; }
 .icon-button:hover { color: var(--primary); background: var(--primary-soft); }

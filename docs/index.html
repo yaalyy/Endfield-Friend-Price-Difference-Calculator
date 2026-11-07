@@ -58,7 +58,7 @@
                       <td class="number price">{{ friends.length ? money(bestPrice(entry.product)) : '—' }}</td>
                       <td class="number diff" :class="getCellClass(getMaxDiff(entry.product, 1).diff)">{{ money(getMaxDiff(entry.product, 1).diff) }}</td>
                       <td class="number"><span class="pill profit" :class="getCellClass(returnRate(entry.product))">{{ returnRate(entry.product).toFixed(1) }}%</span></td>
-                      <td class="number"><span class="pill discount">{{ entry.product.discount || 0 }}%</span></td>
+                      <td class="number"><span class="pill discount" :class="getCellClass(entry.product.discount)">{{ entry.product.discount || 0 }}%</span></td>
                       <td><div class="row-actions"><button class="icon-button" type="button" :aria-label="'编辑 ' + entry.product.name" title="编辑商品" @click.stop="openProductDialog(entry.index)">✎</button><button class="icon-button danger-text" type="button" :aria-label="'删除 ' + entry.product.name" title="删除商品" @click.stop="removeProduct(entry.index)">×</button></div></td>
                     </tr>
                     <tr v-if="!visibleProducts.length"><td colspan="7" class="empty"><p>{{ products.length ? '没有找到匹配的商品，请调整搜索或筛选条件。' : '还没有商品，添加第一件商品开始计算。' }}</p><button v-if="!products.length" class="primary-button" type="button" @click="openProductDialog()">＋ 添加商品</button></td></tr>
