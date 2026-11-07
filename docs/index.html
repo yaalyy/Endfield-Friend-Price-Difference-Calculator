@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>收益计算工具</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        .table-responsive {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        
+        @media screen and (max-width: 768px) {
+            th, td {
+                min-width: 80px;
+            }
+            button {
+                padding: 6px 12px;
+            }
+            input {
+                font-size: 16px; 
+            }
+        }
+
+        table {
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            border: 1px solid #333;
+            padding: 6px;
+            text-align: center;
+            font-weight: lighter;
+            font-size: 15px;
+        }
+
+        input {
+            border: 1px solid #AAA;
+            outline: 0;
+            background-color: rgba(255, 255, 255, 0);
+            padding: 0;
+            margin: 0;
+            height: 100%;
+            font-weight: bolder;
+            text-align: center;
+            font-size: 15px;
+        }
+
+        input:focus {
+            border: 1px solid #666;
+        }
+
+        button {
+            margin-left: 6px;
+        }
+
+        .red {
+            background-color: #f88;
+        }
+
+        .green {
+            background-color: #8f8;
+        }
+
+        .odd-odd {
+            background-color: #fff;
+        }
+
+        .global-max {
+            font-weight: bold;
+            background-color: #ffd700;
+        }
+
+        .product-header {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .delete-product-btn {
+            margin-left: 0;
+            color: #b22222;
+            border-color: #b22222;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <h2 style="text-align: center;">终末地商品收益计算工具</h2>
+        <div style="margin-bottom: 15px; text-align: center;">
+            <label for="quantity">商品数量:</label>
+            <input id="quantity" type="number" v-model.number="quantity" style="border: 1px solid #AAA; width: 80px; height: 26px;">
+        </div>
+        <div class="table-responsive">
+            <table>
+                <thead>
+                    <tr>
+                    <th>商品名</th>
+                    <th v-for="(item, index) in products">
+                        <div class="product-header">
+                            <input type="text" v-model="item.name">
+                            <button class="delete-product-btn" @click="removeProduct(index)">删除</button>
+                        </div>
+                    </th>
+                    <th><input v-model="newProduct.name" placeholder="商品名"></th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>基础价格</td>
+                    <td v-for="item in products">
+                        <!-- <input type="number" v-model.number="item.basePrice" @change="saveProducts"> -->
+                         2000
+                    </td>
+                    <td>
+                        <!-- <input type="number" v-model.number="newProduct.basePrice" placeholder="基础价格"> -->
+                         2000
+                    </td>
+                </tr>
+                <tr>
+                    <td>折扣比(%)</td>
+                    <td v-for="item in products">
+                        <input type="number" v-model.number="item.discount">
+                    </td>
+                    <td><input type="number" v-model.number="newProduct.discount" placeholder="折扣比"></td>
+                </tr>
+                <tr>
+                    <td>实际价格</td>
+                    <td v-for="item in products">
+                        {{ ownPrice(item).toFixed(2) }}
+                    </td>
+                    <td><button @click="addProduct">添加</button></td>
+                </tr>
+                <!-- 新增：最大差价好友名称 -->
+                <tr>
+                    <td>最大差价好友</td>
+                    <td v-for="item in products">
+                        {{ getMaxDiff(item, this.quantity).friend }}
+                    </td>
+                    <td class="global-max">{{ globalMaxDiff.productName ? globalMaxDiff.productName + ' - ' +
+                        globalMaxDiff.friend : '暂无' }}</td>
+                </tr>
+                <!-- 新增：最大差价金额 -->
+                <tr>
+                    <td>最大差价金额</td>
+                    <td v-for="item in products">
+                        {{ getMaxDiff(item, this.quantity).diff.toFixed(2) }}
+                    </td>
+                    <td class="global-max">{{ globalMaxDiff.diff ? globalMaxDiff.diff.toFixed(2) : '0.00' }}</td>
+                </tr>
+
+                <!-- 好友报价行 -->
+                <template v-for="(friend, fIndex) in friends" :key="fIndex">
+                    <tr>
+                        <td rowspan="3">
+                            <input v-model="friend.name">
+                        </td>
+                        <td v-for="item in products" :class="getCellClass(friend.discounts[item.name])">
+                            <input type="number" v-model.number="friend.discounts[item.name]"> %
+                        </td>
+                        <td rowspan="3">
+                            <button @click="removeFriend(fIndex)">删除好友</button>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td v-for="item in products">
+                            {{ calcPrice(item, friend.discounts[item.name]).toFixed(2) }}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td v-for="item in products"
+                            :class="getCellClass(calcPrice(item, friend.discounts[item.name]) - ownPrice(item))">
+                            {{ (calcPrice(item, friend.discounts[item.name]) - ownPrice(item)).toFixed(2) }}
+                        </td>
+                    </tr>
+                </template>
+
+                <!-- 好友新增行 -->
+                <tr>
+                    <td>
+                        <input v-model="newFriend.name" placeholder="好友名称">
+                    </td>
+                    <td v-for="item in products">
+                        <input type="number" v-model.number="newFriend.discounts[item.name]" placeholder="折扣比">
+                    </td>
+                    <td>
+                        <button @click="addFriend">新增好友</button>
+                    </td>
+                </tr>
+            </tbody>
+            </table>
+        </div>
+        <div style="margin-top: 20px; margin-bottom: 10px;">
+        <button @click="resetData" style="color: red; border-color: red;">重置</button>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+        createApp({
+            data() {
+                const defaultBasePrice = 2000; 
+                return {
+                    products: [],
+                    newProduct: { name: '', basePrice: defaultBasePrice, discount: 0 },
+                    friends: [],
+                    newFriend: { name: '', discounts: {} },
+                    quantity: 1,
+                    basePrice: defaultBasePrice,  // 统一基础价格，方便后续修改和扩展
+                }
+            },
+            mounted() {
+                const savedProducts = localStorage.getItem('products');
+                if (savedProducts) this.products = JSON.parse(savedProducts);
+
+                const savedFriends = localStorage.getItem('friends');
+                if (savedFriends) this.friends = JSON.parse(savedFriends);
+
+                const savedQuantity = localStorage.getItem('quantity');
+                if (savedQuantity) this.quantity = parseInt(savedQuantity);
+            },
+            computed: {
+                // 计算所有商品中的最大差价
+                globalMaxDiff() {
+                    if (this.products.length === 0 || this.friends.length === 0) {
+                        return { productName: '', friend: '', diff: 0 };
+                    }
+
+                    let maxDiff = -Infinity;
+                    let maxDiffProduct = null;
+                    let maxDiffFriend = '';
+
+                    this.products.forEach(product => {
+                        const maxDiffInfo = this.getMaxDiff(product, this.quantity);
+                        if (maxDiffInfo.diff > maxDiff) {
+                            maxDiff = maxDiffInfo.diff;
+                            maxDiffProduct = product;
+                            maxDiffFriend = maxDiffInfo.friend;
+                        }
+                    });
+
+                    return {
+                        productName: maxDiffProduct ? maxDiffProduct.name : '',
+                        friend: maxDiffFriend,
+                        diff: maxDiff === -Infinity ? 0 : maxDiff
+                    };
+                }
+            },
+            watch: {
+                products: {
+                    handler() {
+                        this.saveProducts();
+                    },
+                    deep: true
+                },
+                friends: {
+                    handler() {
+                        this.saveFriends();
+                    },
+                    deep: true
+                },
+                quantity() {
+                    this.saveQuantity();
+                }
+            },
+            methods: {
+                // 计算单个物品的实际价格
+                ownPrice(item) {
+                    return item.basePrice * (1 + item.discount / 100);
+                },
+                addProduct() {
+                    if (!this.newProduct.name) return;
+                    this.products.push({ ...this.newProduct });
+                    this.newProduct = { name: '', basePrice: this.basePrice, discount: 0 };
+                    this.saveProducts();
+                },
+                removeProduct(index) {
+                    const removedProduct = this.products[index];
+                    if (!removedProduct) return;
+
+                    this.products.splice(index, 1);
+                    this.friends.forEach(friend => {
+                        delete friend.discounts[removedProduct.name];
+                    });
+                    delete this.newFriend.discounts[removedProduct.name];
+
+                    this.saveProducts();
+                    this.saveFriends();
+                },
+                saveProducts() {
+                    const toSave = this.products.map(p => ({ name: p.name, basePrice: p.basePrice, discount: p.discount }));
+                    localStorage.setItem('products', JSON.stringify(toSave));
+                },
+                addFriend() {
+                    if (!this.newFriend.name) return;
+                    this.friends.push({ name: this.newFriend.name, discounts: { ...this.newFriend.discounts } });
+                    this.newFriend = { name: '', discounts: {} };
+                    this.saveFriends();
+                },
+                removeFriend(index) {
+                    this.friends.splice(index, 1);
+                    this.saveFriends();
+                },
+                saveFriends() {
+                    localStorage.setItem('friends', JSON.stringify(this.friends));
+                },
+                calcPrice(item, discount) {
+                    return item.basePrice * (1 + item.discount / 100) * (1 + (discount || 0) / 100);
+                },
+                getCellClass(value) {
+                    if (value > 0) return 'red';
+                    if (value < 0) return 'green';
+                    return '';
+                },
+                getMaxDiff(item, quantity) {
+                    let maxDiff = -Infinity;
+                    let maxFriend = '';
+
+                    const own = this.ownPrice(item);
+                    this.friends.forEach(friend => {
+                        const fPrice = this.calcPrice(item, friend.discounts[item.name]);
+                        const diff = (fPrice - own) * quantity;
+                        if (diff > maxDiff) {
+                            maxDiff = diff;
+                            maxFriend = friend.name;
+                        }
+                    });
+                    return { friend: maxFriend || '-', diff: maxDiff === -Infinity ? 0 : maxDiff };
+                },
+                resetData(){
+                    if(confirm('确定要清空所有商品和好友数据吗？此操作不可逆。')){
+                        this.products = [];
+                        this.friends = [];
+                        this.newProduct = { name: '', basePrice: this.basePrice, discount: 0 };
+                        this.newFriend = { name: '', discounts: {} };
+                        this.quantity = 1;
+                        this.saveFriends();
+                        this.saveProducts();
+                        this.saveQuantity();
+                        
+                    }
+                },
+                saveQuantity(){
+                    localStorage.setItem('quantity', this.quantity);
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+
+</html>
