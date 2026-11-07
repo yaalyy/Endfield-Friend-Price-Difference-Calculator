@@ -1,6 +1,30 @@
 # Endfield-Friend-Price-Difference-Calculator
+
 《明日方舟 终末地》物资调度 弹性需求物品 好友价格差价计算器
 
-[在线预览](https://bili345679.github.io/Endfield-Friend-Price-Difference-Calculator/index.html)
+## UI展示
 
-<img width="3840" height="2160" alt="收益查看工具 - Google Chrome 2026_1_30 19_36_07" src="https://github.com/user-attachments/assets/00d2276a-f3bc-43d2-a1d9-35bc75ec2ea3" />
+
+### 商品收益计算
+
+对比商品价格、单件差价与收益率，查看所选商品的好友报价和指定数量下的最高收益。
+
+![商品收益计算：商品列表、全局最大差价与右侧计算明细](imgs/demo-calculator.png)
+
+### 商品管理
+
+集中查看商品基础价格、我的折扣比与实际价格，支持新建、编辑和删除商品。
+
+![商品管理：商品列表、基础价格、折扣比与实际价格](imgs/demo-products.png)
+
+### 好友报价
+
+按好友录入各商品的折扣比，实时查看报价与单件差价。
+
+![好友报价：好友与商品折扣比、报价和单件差价](imgs/demo-friends.png)
+
+### 添加商品
+
+填写商品名称和我的折扣比，保存前可预览实际价格。
+
+![添加商品：商品信息表单与实时价格预览](imgs/demo-add-product.png)
