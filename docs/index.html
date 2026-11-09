@@ -137,7 +137,7 @@
               <button v-if="importState.previewUrl && importState.status !== 'running'" class="secondary-button" type="button" @click="startRecognition">重新识别</button>
             </div>
             <input ref="importFile" type="file" accept="image/jpeg,image/png,image/webp" hidden @change="onImportFileChange">
-            <p class="form-hint">支持 JPEG、PNG、WebP。首次识别需加载模型。</p>
+            <p class="form-hint">推荐使用游戏内截图，拍照识别准确率可能较低。支持 JPEG、PNG、WebP。首次识别需加载模型。</p>
           </div>
           <div class="import-result">
             <div v-if="importState.status === 'running'" class="import-progress" aria-live="polite">
