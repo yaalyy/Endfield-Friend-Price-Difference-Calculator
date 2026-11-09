@@ -1,0 +1,78 @@
+name: Test
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches-ignore: [main]
+  workflow_dispatch:
+    inputs:
+      pages:
+        description: 'pages tested（unit app ui e2e）'
+        type: string
+        default: 'unit app ui'
+      min_coverage:
+        description: 'minimum coverage limit'
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      pages:
+        type: string
+        default: 'unit app ui'
+      min_coverage:
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: tests/requirements.txt
+
+      - name: Install Playwright and Chromium
+        run: |
+          python -m pip install -r tests/requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Run tests
+        env:
+          PAGES: ${{ inputs.pages || 'unit app ui' }}
+          MIN_COVERAGE: ${{ inputs.min_coverage }}
+        run: |
+          args=(--coverage)
+          if [ -n "$MIN_COVERAGE" ]; then args+=(--min-coverage "$MIN_COVERAGE"); fi
+          read -ra pages <<< "$PAGES"
+          python -I tests/run.py "${pages[@]}" "${args[@]}" 2>&1 | tee test-output.txt
+
+      - name: Write job summary
+        if: always()
+        run: |
+          if [ -f test-output.txt ]; then
+            { echo '```'; cat test-output.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: coverage/lcov.info
+          if-no-files-found: ignore
