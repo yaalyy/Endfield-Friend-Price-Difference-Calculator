@@ -231,7 +231,61 @@
     }
 
     function findBars(image) {
-        return findLightBars(image).concat(findLightBars(image, { threshold: 100, dark: true }));
+        return dedupeBars(findLightBars(image).concat(findLightBars(image, { threshold: 100, dark: true })));
+    }
+
+    // 浅色条与深色条可能是同一个名称条（深色底 + 白字）：两者重叠时只保留面积较大者，避免一个商品有两个名称。
+    // 另外去掉横跨多个名称条的条带（名称条下方的亮色分隔线），它不是名称。
+    function dedupeBars(bars) {
+        const area = b => (b.x1 - b.x0) * (b.y1 - b.y0);
+        const inter = (a, b) => Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
+        const near = (a, b) => Math.abs(cy(a) - cy(b)) < Math.max(h(a), h(b));
+        const spans = bars.filter(b => bars.filter(o => o !== b && near(o, b) && cx(o) > b.x0 && cx(o) < b.x1 && w(o) < w(b) * 0.6).length >= 2);
+        const rest = bars.filter(b => !spans.includes(b)).sort((a, b) => area(b) - area(a));
+        const kept = [];
+        rest.forEach(b => { if (!kept.some(k => inter(k, b) > 0.5 * Math.min(area(k), area(b)))) kept.push(b); });
+        return kept.sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0);
+    }
+
+    // 倾斜角估计（度）：名称条、卡片边缘是长横线。取横向边缘像素（上下亮度差大），按不同角度做行投影，
+    // 投影越"尖"（行和的平方和越大）说明越接近水平。只用边缘而不用整片深色区域，避免显示器黑边主导结果。
+    // 只在 ±maxDeg 内搜索，图像先缩小以加快速度。
+    function estimateSkew(image, { maxDeg = 5, step = 0.25 } = {}) {
+        const { data, width: W, height: H } = image;
+        const ds = Math.max(1, Math.round(W / 900));
+        const w2 = Math.floor(W / ds), h2 = Math.floor(H / ds);
+        const L = new Float32Array(w2 * h2);
+        for (let y = 0; y < h2; y++) for (let x = 0; x < w2; x++) {
+            const i = ((y * ds) * W + x * ds) * 4;
+            L[y * w2 + x] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        }
+        const pts = [];
+        for (let y = 1; y < h2 - 1; y++) for (let x = 1; x < w2 - 1; x++) {
+            const gy = Math.abs(L[(y + 1) * w2 + x] - L[(y - 1) * w2 + x]);
+            const gx = Math.abs(L[y * w2 + x + 1] - L[y * w2 + x - 1]);
+            if (gy > 60 && gy > 2 * gx) pts.push(x, y);
+        }
+        if (pts.length < 200) return 0;
+        const score = deg => {
+            const t = Math.tan(deg * Math.PI / 180);
+            const rows = new Float64Array(h2 + w2 * 2 + 2);
+            const off = w2 + 1;
+            for (let k = 0; k < pts.length; k += 2) rows[Math.round(pts[k + 1] - pts[k] * t) + off]++;
+            let s = 0;
+            for (let i = 0; i < rows.length; i++) s += rows[i] * rows[i];
+            return s;
+        };
+        let best = 0, bestScore = score(0);
+        for (let d = -maxDeg; d <= maxDeg + 1e-9; d += step) {
+            const s = score(d);
+            if (s > bestScore) { bestScore = s; best = d; }
+        }
+        // 在最佳角附近细化
+        for (let d = best - step; d <= best + step + 1e-9; d += step / 5) {
+            const s = score(d);
+            if (s > bestScore) { bestScore = s; best = d; }
+        }
+        return Math.round(best * 100) / 100;
     }
 
     // 区域内的深色面板（如折扣标签底色）：深色像素占比 > 30% 的行列范围。找不到返回 null。
@@ -252,7 +306,7 @@
         return { x0: xs[0], y0: ys[0], x1: xs[1], y1: ys[1] };
     }
 
-    const api = { tokenize, pairFields, colorSign, dominantDirection, findLightBars, findBars, darkPanel, isValueWord, mergeDigitWords };
+    const api = { tokenize, pairFields, colorSign, dominantDirection, findLightBars, findBars, dedupeBars, estimateSkew, darkPanel, isValueWord, mergeDigitWords };
     root.OcrPair = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof self !== 'undefined' ? self : this);

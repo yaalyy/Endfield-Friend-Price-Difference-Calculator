@@ -48,7 +48,26 @@
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
         bitmap.close();
-        return canvas;
+        return deskew(canvas);
+    }
+
+    // 手机拍屏常有轻微倾斜，会让同一行的名称条连成一条：估计倾斜角并反向旋转。截图角度为 0，不做处理。
+    function deskew(canvas) {
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const deg = Pair.estimateSkew({ data: ctx.getImageData(0, 0, canvas.width, canvas.height).data, width: canvas.width, height: canvas.height });
+        if (Math.abs(deg) < 0.3) return canvas;
+        const out = document.createElement('canvas');
+        out.width = canvas.width;
+        out.height = canvas.height;
+        const octx = out.getContext('2d', { willReadFrequently: true });
+        octx.fillStyle = '#000';
+        octx.fillRect(0, 0, out.width, out.height);
+        octx.imageSmoothingQuality = 'high';
+        octx.translate(out.width / 2, out.height / 2);
+        octx.rotate(-deg * Math.PI / 180);
+        octx.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
+        out.skewDeg = deg;
+        return out;
     }
 
     function clampRect(rect, canvas) {
