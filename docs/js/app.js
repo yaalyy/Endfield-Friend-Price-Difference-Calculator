@@ -4,6 +4,34 @@ const { createApp } = Vue;
 let importSession = null;
 const emptyImportState = () => ({ status: 'idle', file: null, previewUrl: '', rows: [], error: '', dragging: false, progress: { label: '', progress: 0 } });
 
+function readStorage(key) {
+    try {
+        return localStorage.getItem(key);
+    } catch (error) {
+        console.warn('Error on loading local data：' + key, error);
+        return null;
+    }
+}
+function writeStorage(key, value) {
+    try {
+        localStorage.setItem(key, value);
+    } catch (error) {
+        console.warn('Error on saving local data：' + key, error);
+    }
+}
+// Damaged stored data will return null，the page starts with empty data
+function readStoredArray(key) {
+    const raw = readStorage(key);
+    if (raw === null) return null;
+    try {
+        const value = JSON.parse(raw);
+        return Array.isArray(value) ? value : null;
+    } catch (error) {
+        console.warn('Local data is damaged and ignored：' + key, error);
+        return null;
+    }
+}
+
 createApp({
     data() {
         const defaultBasePrice = 2000;
@@ -34,14 +62,14 @@ createApp({
     },
     mounted() {
         // Load data already stored in browser
-        const savedProducts = localStorage.getItem('products');
-        if (savedProducts) this.products = JSON.parse(savedProducts);
+        const savedProducts = readStoredArray('products');
+        if (savedProducts) this.products = savedProducts;
 
-        const savedFriends = localStorage.getItem('friends');
-        if (savedFriends) this.friends = JSON.parse(savedFriends);
+        const savedFriends = readStoredArray('friends');
+        if (savedFriends) this.friends = savedFriends;
 
-        const savedQuantity = localStorage.getItem('quantity');
-        if (savedQuantity) this.quantity = parseInt(savedQuantity);
+        const savedQuantity = parseInt(readStorage('quantity'), 10);
+        if (Number.isFinite(savedQuantity)) this.quantity = savedQuantity;
     },
     beforeUnmount() {
         document.removeEventListener('paste', this.onImportPaste);
@@ -315,7 +343,7 @@ createApp({
         },
         saveProducts() {
             const toSave = this.products.map(p => ({ name: p.name, basePrice: p.basePrice, discount: p.discount }));
-            localStorage.setItem('products', JSON.stringify(toSave));
+            writeStorage('products', JSON.stringify(toSave));
         },
         addFriend() {
             if (!this.newFriend.name) return;
@@ -328,7 +356,7 @@ createApp({
             this.saveFriends();
         },
         saveFriends() {
-            localStorage.setItem('friends', JSON.stringify(this.friends));
+            writeStorage('friends', JSON.stringify(this.friends));
         },
         calcPrice(item, discount) {
             return item.basePrice * (1 + item.discount / 100) * (1 + (discount || 0) / 100);
@@ -372,7 +400,7 @@ createApp({
             }
         },
         saveQuantity(){
-            localStorage.setItem('quantity', this.quantity);
+            writeStorage('quantity', this.quantity);
         }
     }
 }).mount('#app');
