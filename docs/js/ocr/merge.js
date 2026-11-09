@@ -2,9 +2,8 @@
 (function (root) {
     'use strict';
 
-    const halfWidth = text => String(text || '')
-        .replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
-        .replace(/\s/g, '');
+    const P = root.OcrParse || (typeof require !== 'undefined' ? require('./parse.js') : null);
+    const halfWidth = text => P.toHalfWidth(text).replace(/\s/g, '');
 
     // lavenshtein distance between two strings
     function levenshtein(a, b) {
