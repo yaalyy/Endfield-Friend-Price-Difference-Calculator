@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>App calculation & CRUD tests</title></head>
+<body>
+<pre id="out">RUNNING</pre>
+<iframe id="app" style="width:1400px;height:900px"></iframe>
+<script>
+// 运行：python -I tests/serve.py，然后打开 /tests/app.html。会清空该源下的 localStorage。
+// 覆盖差价/收益率计算，以及商品、好友的增删改与持久化。
+const log = [];
+const ok = (cond, msg) => log.push((cond ? 'ok   ' : 'FAIL ') + msg);
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const near = (a, b) => Math.abs(a - b) < 1e-9;
+const show = v => JSON.stringify(v);
+const wait = ms => new Promise(r => setTimeout(r, ms));
+async function until(fn, ms = 60000) { const t = Date.now(); while (Date.now() - t < ms) { const v = fn(); if (v) return v; await wait(100); } return null; }
+
+const frame = document.getElementById('app');
+let doc, win, vm, errors = [];
+const stored = key => JSON.parse(localStorage.getItem(key));
+const text = el => el ? el.textContent.trim() : null;
+const $ = sel => doc.querySelector(sel);
+const $$ = (sel, root = doc) => [...root.querySelectorAll(sel)];
+const button = (label, root = doc) => $$('button', root).find(b => b.textContent.trim() === label);
+const settle = async () => { await vm.$nextTick(); await wait(30); };
+
+async function load(state) {
+    if (state) {
+        localStorage.clear();
+        Object.entries(state).forEach(([key, value]) => localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value)));
+    }
+    await new Promise(r => {
+        frame.addEventListener('load', r, { once: true });
+        frame.src = '../docs/index.html?t=' + Date.now();
+    });
+    doc = frame.contentDocument;
+    win = frame.contentWindow;
+    win.addEventListener('error', e => errors.push(e.message));
+    win.addEventListener('unhandledrejection', e => errors.push(String(e.reason)));
+    const app = await until(() => doc.getElementById('app').__vue_app__);
+    if (!app) throw new Error('Vue app did not mount');
+    vm = app._instance.proxy;
+    await settle();
+}
+async function type(input, value) {
+    input.value = String(value);
+    input.dispatchEvent(new win.Event('input', { bubbles: true }));
+    await settle();
+}
+async function click(el) { el.click(); await settle(); }
+function rowByName(section, name) {
+    return $$(`section[aria-label="${section}"] tbody tr`).find(tr => {
+        const cell = tr.querySelector('.product-name, .inline-input');
+        return cell && (cell.value || cell.textContent.trim()) === name;
+    });
+}
+
+// 我的价格 = 基础价格 × (1 + 我的折扣/100)；好友报价 = 我的价格 × (1 + 好友折扣/100)
+// 竹笋 2000×1.1=2200；冬虫 2000×0.8=1600；冻梨 1800×1=1800
+const calcProducts = [
+    { name: '竹笋货组', basePrice: 2000, discount: 10 },
+    { name: '冬虫夏笋货组', basePrice: 2000, discount: -20 },
+    { name: '武陵冻梨货组', basePrice: 1800, discount: 0 }
+];
+// 竹笋：甲 2310(+110) 乙 2090(-110) 丙 2376(+176) → 丙 176，收益率 8%
+// 冬虫：甲 1440(-160) 乙 2000(+400) 丙 1600(0)   → 乙 400，收益率 25%
+// 冻梨：全部未填 → 0，平局取第一位好友
+const calcFriends = [
+    { name: '好友甲', discounts: { '竹笋货组': 5, '冬虫夏笋货组': -10 } },
+    { name: '好友乙', discounts: { '竹笋货组': -5, '冬虫夏笋货组': 25 } },
+    { name: '好友丙', discounts: { '竹笋货组': 8 } }
+];
+const byName = name => vm.products.find(p => p.name === name);
+const cells = (section, name) => $$('td', rowByName(section, name)).map(td => td.textContent.trim());
+
+async function calcTests() {
+    await load({ products: calcProducts, friends: calcFriends, quantity: '3' });
+    const [bamboo, cordyceps, pear] = ['竹笋货组', '冬虫夏笋货组', '武陵冻梨货组'].map(byName);
+
+    // ---------- 公式 ----------
+    ok(near(vm.ownPrice(bamboo), 2200) && near(vm.ownPrice(cordyceps), 1600) && near(vm.ownPrice(pear), 1800), 'ownPrice = base × (1 + discount/100)');
+    ok(near(vm.calcPrice(bamboo, 5), 2310) && near(vm.calcPrice(cordyceps, -10), 1440), 'calcPrice applies friend discount on top of my price');
+    ok(near(vm.calcPrice(bamboo, undefined), 2200) && near(vm.calcPrice(bamboo, ''), 2200), 'missing / blank friend discount counts as 0%');
+
+    // ---------- 单件差价、最优好友 ----------
+    const d1 = vm.getMaxDiff(bamboo, 1), d2 = vm.getMaxDiff(cordyceps, 1), d3 = vm.getMaxDiff(pear, 1);
+    ok(d1.friend === '好友丙' && near(d1.diff, 176), 'max diff 竹笋 → 好友丙 176: ' + show(d1));
+    ok(d2.friend === '好友乙' && near(d2.diff, 400), 'max diff 冬虫 → 好友乙 400: ' + show(d2));
+    ok(d3.friend === '好友甲' && d3.diff === 0, 'all-zero tie keeps first friend: ' + show(d3));
+    ok(near(vm.getMaxDiff(bamboo, 3).diff, 528), 'diff scales with quantity (176 × 3)');
+    ok(near(vm.bestPrice(bamboo), 2376) && near(vm.bestPrice(cordyceps), 2000), 'bestPrice = my price + max diff');
+    ok(vm.bestFriendIndex(bamboo) === 2 && vm.bestFriendIndex(cordyceps) === 1 && vm.bestFriendIndex(pear) === 0, 'bestFriendIndex matches max diff friend');
+
+    // ---------- 收益率 ----------
+    ok(near(vm.returnRate(bamboo), 8) && near(vm.returnRate(cordyceps), 25) && vm.returnRate(pear) === 0, 'returnRate = diff / my price × 100');
+
+    // ---------- 全局最大差价 ----------
+    ok(eq({ ...vm.globalMaxDiff, diff: Math.round(vm.globalMaxDiff.diff) }, { productName: '冬虫夏笋货组', friend: '好友乙', diff: 1200 }), 'globalMaxDiff uses quantity: ' + show(vm.globalMaxDiff));
+    ok(text($('.summary-value')) === '1,200.00' && text($('.summary-pair')) === '冬虫夏笋货组 → 好友乙', 'summary bar shows ' + text($('.summary-pair')) + ' ' + text($('.summary-value')));
+
+    // ---------- 列表渲染 ----------
+    const row = cells('商品收益计算', '竹笋货组');
+    ok(eq(row.slice(1, 6), ['2,200.00', '2,376.00', '176.00', '8.0%', '10%']), 'calculator row 竹笋: ' + show(row.slice(1, 6)));
+    ok(rowByName('商品收益计算', '竹笋货组').querySelector('.diff').classList.contains('red'), 'positive diff styled red');
+    ok(text(rowByName('商品收益计算', '冬虫夏笋货组').querySelector('.product-subtitle')) === '最优好友 · 好友乙', 'row subtitle shows best friend');
+
+    // ---------- 排序与筛选 ----------
+    const visible = () => vm.visibleProducts.map(e => e.product.name);
+    vm.sortOrder = 'desc'; await settle();
+    ok(eq(visible(), ['冬虫夏笋货组', '竹笋货组', '武陵冻梨货组']), 'sort by return rate desc: ' + show(visible()));
+    vm.sortOrder = 'asc'; await settle();
+    ok(eq(visible(), ['武陵冻梨货组', '竹笋货组', '冬虫夏笋货组']), 'sort by return rate asc: ' + show(visible()));
+    vm.sortOrder = '';
+    vm.profitFilter = 'positive'; await settle();
+    ok(eq(visible(), ['竹笋货组', '冬虫夏笋货组']), 'filter positive: ' + show(visible()));
+    vm.profitFilter = 'nonpositive'; await settle();
+    ok(eq(visible(), ['武陵冻梨货组']), 'filter nonpositive includes zero diff: ' + show(visible()));
+    vm.profitFilter = 'all'; await settle();
+
+    // ---------- 明细面板 ----------
+    await click(rowByName('商品收益计算', '竹笋货组').querySelector('.product-link'));
+    const metrics = $$('.detail-panel .metric-value').map(text);
+    ok(eq(metrics, ['2,200.00', '2,376.00', '176.00', '8.0%']), 'detail metrics: ' + show(metrics));
+    const bestRow = $('.detail-panel .friend-row.best .friend-name');
+    ok(text(bestRow) === '好友丙', 'detail marks best friend: ' + text(bestRow));
+    ok(text($('.detail-panel .estimate-value')) === '528.00', 'detail estimate for quantity 3: ' + text($('.detail-panel .estimate-value')));
+
+    // ---------- 修改输入后实时重算 ----------
+    await type($('#quantity'), 5);
+    ok(text($('.summary-value')) === '2,000.00' && localStorage.getItem('quantity') === '5', 'quantity change recalculates (400 × 5) and is saved');
+    await type($('#ownDiscount'), 20); // 竹笋 我的价格 2400；丙 2592(+192)，收益率 8%
+    ok(near(vm.ownPrice(bamboo), 2400) && near(vm.getMaxDiff(bamboo, 1).diff, 192), 'editing my discount in detail recalculates diff');
+    ok(stored('products')[0].discount === 20, 'my discount edit saved to localStorage');
+    const quoteInput = $$('.detail-panel .quote-input input')[1]; // 好友乙
+    await type(quoteInput, 30); // 2400 × 1.3 = 3120 (+720)
+    ok(vm.getMaxDiff(bamboo, 1).friend === '好友乙' && near(vm.getMaxDiff(bamboo, 1).diff, 720), 'editing friend quote switches best friend');
+    ok(text($('.detail-panel .friend-row.best .friend-name')) === '好友乙', 'best tag follows new best friend');
+    ok(stored('friends')[1].discounts['竹笋货组'] === 30, 'friend quote edit saved to localStorage');
+
+    // ---------- 边界 ----------
+    // 所有好友都更低时，最大差价为负数（亏损最小的好友）
+    await load({ products: [{ name: '竹笋货组', basePrice: 2000, discount: 0 }], friends: [{ name: '甲', discounts: { '竹笋货组': -10 } }, { name: '乙', discounts: { '竹笋货组': -5 } }] });
+    const loss = vm.getMaxDiff(vm.products[0], 1);
+    ok(loss.friend === '乙' && near(loss.diff, -100) && near(vm.returnRate(vm.products[0]), -5), 'all friends lower → least negative diff: ' + show(loss));
+    ok(rowByName('商品收益计算', '竹笋货组').querySelector('.diff').classList.contains('green'), 'negative diff styled green');
+    vm.profitFilter = 'positive'; await settle();
+    ok(vm.visibleProducts.length === 0 && text($('section[aria-label="商品列表"] .empty p')).includes('没有找到匹配'), 'positive filter hides loss product and shows no-match hint');
+
+    // 我的价格为 0（折扣 -100%）时收益率为 0，不出现 NaN/Infinity
+    await load({ products: [{ name: '竹笋货组', basePrice: 2000, discount: -100 }], friends: [{ name: '甲', discounts: { '竹笋货组': 50 } }] });
+    ok(vm.returnRate(vm.products[0]) === 0 && text($('.pill.profit')) === '0.0%', 'zero own price → return rate 0.0%');
+
+    // 无好友
+    await load({ products: [{ name: '竹笋货组', basePrice: 2000, discount: 10 }], friends: [] });
+    ok(eq(vm.getMaxDiff(vm.products[0], 1), { friend: '-', diff: 0 }) && vm.returnRate(vm.products[0]) === 0, 'no friends → diff 0, friend "-"');
+    ok(eq(vm.globalMaxDiff, { productName: '', friend: '', diff: 0 }) && text($('.summary-pair')).startsWith('暂无报价'), 'no friends → empty global summary');
+    ok(cells('商品收益计算', '竹笋货组')[2] === '—', 'no friends → best quote shows —');
+    ok(vm.bestFriendIndex(vm.products[0]) === -1, 'no friends → bestFriendIndex -1');
+}
+
+const dialogEl = () => $('.add-dialog');
+const submitDialog = () => click(dialogEl().querySelector('button[type=submit]'));
+const formError = () => text(dialogEl() && dialogEl().querySelector('.dialog-error'));
+const goto = label => click($$('.sidebar .nav button').find(b => b.textContent.includes(label)));
+const names = () => stored('products').map(p => p.name);
+
+async function crudTests() {
+    await load({ products: [{ name: '竹笋货组', basePrice: 2000, discount: 10 }], friends: [{ name: '好友甲', discounts: { '竹笋货组': 5 } }] });
+
+    // ---------- 新增商品 ----------
+    await click(button('＋ 添加商品'));
+    ok(text(dialogEl().querySelector('h2')) === '添加商品' && $('#newBasePrice').value === '2000', 'add dialog opens with default base price 2000');
+    await type($('#newName'), '   ');
+    await submitDialog();
+    ok(formError() === '请填写商品名称。' && stored('products').length === 1, 'blank name rejected');
+    await type($('#newName'), ' 竹笋货组 ');
+    await submitDialog();
+    ok(formError() && formError().includes('同名商品') && stored('products').length === 1, 'duplicate name (after trim) rejected');
+    await type($('#newName'), ' 冬虫夏笋货组 ');
+    await type($('#newDiscount'), -31.6);
+    const preview = $$('.add-preview .preview-row strong').map(text);
+    ok(eq(preview, ['2,000.00', '-31.6%', '1,368.00']), 'add preview shows price: ' + show(preview));
+    await submitDialog();
+    ok(!dialogEl(), 'dialog closes after add');
+    ok(eq(stored('products')[1], { name: '冬虫夏笋货组', basePrice: 2000, discount: -31.6 }), 'new product saved trimmed: ' + show(stored('products')[1]));
+    ok(text($('.detail-panel h2')) === '冬虫夏笋货组 · 计算明细', 'new product becomes selected');
+    ok(stored('friends')[0].discounts['冬虫夏笋货组'] === undefined && near(vm.calcPrice(vm.products[1], stored('friends')[0].discounts['冬虫夏笋货组']), vm.ownPrice(vm.products[1])), 'existing friend quotes new product at 0%');
+    await click(button('＋ 添加商品'));
+    ok($('#newName').value === '' && $('#newDiscount').value === '0', 'add dialog resets form after previous add');
+    await click(button('取消', dialogEl()));
+
+    // ---------- 编辑商品 ----------
+    await goto('商品管理');
+    await click(button('编辑', rowByName('商品管理', '竹笋货组')));
+    ok(text(dialogEl().querySelector('h2')) === '编辑商品' && $('#newName').value === '竹笋货组' && $('#newDiscount').value === '10', 'edit dialog prefilled');
+    await type($('#newName'), '冬虫夏笋货组');
+    await submitDialog();
+    ok(formError() && formError().includes('同名商品'), 'rename to another product name rejected');
+    await type($('#newName'), '竹笋货组');
+    await type($('#newDiscount'), 15);
+    await click(button('取消', dialogEl()));
+    ok(vm.products[0].name === '竹笋货组' && vm.products[0].discount === 10 && stored('products')[0].discount === 10, 'cancel edit leaves product unchanged');
+
+    await click(button('编辑', rowByName('商品管理', '竹笋货组')));
+    await type($('#newName'), '竹笋货组'); // 保留原名直接保存不算重名
+    await type($('#newDiscount'), 15);
+    await submitDialog();
+    ok(!dialogEl() && stored('products')[0].discount === 15, 'edit discount keeping same name saves');
+    ok(eq(cells('商品管理', '竹笋货组').slice(1, 4), ['2,000.00', '15%', '2,300.00']), 'manage row updated: ' + show(cells('商品管理', '竹笋货组').slice(1, 4)));
+
+    await click(button('编辑', rowByName('商品管理', '竹笋货组')));
+    await type($('#newName'), '春笋货组');
+    await submitDialog();
+    ok(eq(names(), ['春笋货组', '冬虫夏笋货组']) && stored('products')[0].basePrice === 2000, 'rename saved, base price kept');
+    ok(eq(stored('friends')[0].discounts, { '春笋货组': 5 }), 'rename moves friend quotes to new name: ' + show(stored('friends')[0].discounts));
+    ok(near(vm.getMaxDiff(vm.products[0], 1).diff, 115), 'renamed product keeps friend diff (2300 × 5%)');
+
+    // ---------- 搜索商品库 ----------
+    await type($('section[aria-label="商品管理"] input[type=search]'), '冬虫');
+    ok(eq(vm.libraryProducts.map(e => e.product.name), ['冬虫夏笋货组']), 'library search filters by name');
+    await type($('section[aria-label="商品管理"] input[type=search]'), '');
+
+    // ---------- 新增好友 ----------
+    await goto('好友报价');
+    await click(button('＋ 新增好友'));
+    ok(text(dialogEl().querySelector('h2')) === '新增好友' && $$('[id^=newFriendDiscount]').length === 2, 'friend dialog lists a discount field per product');
+    await type($('#newFriendName'), '  ');
+    await submitDialog();
+    ok(formError() === '请填写好友名称。' && stored('friends').length === 1, 'blank friend name rejected');
+    await type($('#newFriendName'), ' 好友乙 ');
+    await type($('#newFriendDiscount0'), 12);
+    await submitDialog();
+    ok(!dialogEl() && eq(stored('friends')[1], { name: '好友乙', discounts: { '春笋货组': 12 } }), 'friend added with trimmed name and quotes: ' + show(stored('friends')[1]));
+    ok(vm.getMaxDiff(vm.products[0], 1).friend === '好友乙' && near(vm.getMaxDiff(vm.products[0], 1).diff, 276), 'new friend joins max diff (2300 × 12%)');
+    await click(button('＋ 新增好友'));
+    ok($('#newFriendName').value === '' && $('#newFriendDiscount0').value === '', 'friend dialog resets after add');
+    await click(button('取消', dialogEl()));
+    ok(stored('friends').length === 2, 'cancel friend dialog adds nothing');
+
+    // ---------- 编辑好友 ----------
+    const friendRow = rowByName('好友报价管理', '好友乙');
+    await type(friendRow.querySelector('.inline-input'), '好友丙');
+    ok(stored('friends')[1].name === '好友丙', 'inline friend rename saved');
+    const quoteCells = $$('td', rowByName('好友报价管理', '好友丙'));
+    await type(quoteCells[2].querySelector('input'), 50); // 冬虫 1368 × 1.5 → +684
+    ok(stored('friends')[1].discounts['冬虫夏笋货组'] === 50, 'inline friend quote saved');
+    ok(text(quoteCells[2].querySelector('.quote-diff')) === '单件差价 684.00', 'inline quote diff updates: ' + text(quoteCells[2].querySelector('.quote-diff')));
+    ok(vm.getMaxDiff(vm.products[1], 1).friend === '好友丙', 'max diff friend uses renamed friend');
+
+    // ---------- 删除商品 ----------
+    await goto('商品管理');
+    await click(button('删除', rowByName('商品管理', '春笋货组')));
+    ok(eq(names(), ['冬虫夏笋货组']), 'product deleted');
+    ok(stored('friends').every(f => !('春笋货组' in f.discounts)), 'deleting product removes its friend quotes: ' + show(stored('friends').map(f => f.discounts)));
+    await goto('商品收益计算');
+    ok(text($('.detail-panel h2')) === '冬虫夏笋货组 · 计算明细', 'detail falls back to remaining product');
+    await click(button('删除商品'));
+    ok(stored('products').length === 0 && text($('.detail-panel > .empty')).startsWith('添加商品后'), 'delete from detail panel; empty detail shown');
+    ok(text($('section[aria-label="商品列表"] .empty p')).startsWith('还没有商品'), 'empty product list hint');
+
+    // ---------- 删除好友 ----------
+    await goto('好友报价');
+    await click(button('删除好友', rowByName('好友报价管理', '好友甲')));
+    ok(eq(stored('friends').map(f => f.name), ['好友丙']), 'friend deleted, others kept');
+
+    // ---------- 持久化 ----------
+    await click(button('＋ 新增好友'));
+    await type($('#newFriendName'), '好友丁');
+    await submitDialog();
+    await type($('#quantity'), 4);
+    const before = { products: localStorage.getItem('products'), friends: localStorage.getItem('friends') };
+    await load();
+    ok(eq(vm.products, JSON.parse(before.products)) && eq(vm.friends, JSON.parse(before.friends)) && vm.quantity === 4, 'data restored after reload');
+
+    // ---------- 重置 ----------
+    win.confirm = () => false;
+    await click($('.sidebar .reset-button'));
+    ok(stored('friends').length === 2 && vm.quantity === 4, 'reset cancelled keeps data');
+    win.confirm = () => true;
+    await click($('.sidebar .reset-button'));
+    ok(eq(stored('products'), []) && eq(stored('friends'), []) && localStorage.getItem('quantity') === '1', 'reset clears products, friends and quantity');
+}
+
+(async () => {
+    try {
+        await calcTests();
+        await crudTests();
+        ok(!errors.length, 'no page errors ' + show(errors));
+    } catch (e) {
+        log.push('ERROR ' + (e && e.stack || e));
+    }
+    localStorage.clear();
+    const failed = log.filter(l => l.startsWith('FAIL') || l.startsWith('ERROR')).length;
+    const result = log.join('\n') + '\n' + (failed ? 'FAILED ' + failed : 'ALL PASSED ' + log.length);
+    document.getElementById('out').textContent = result;
+    fetch('/result', { method: 'POST', body: result }).catch(() => {});
+})();
+</script>
+</body>
+</html>

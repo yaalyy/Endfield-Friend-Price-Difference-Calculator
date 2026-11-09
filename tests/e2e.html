@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>OCR import e2e</title>
+<!-- 资源按 docs/ 相对路径解析，模拟 GitHub Pages 子路径部署 -->
+<base href="../docs/">
+</head>
+<body>
+<pre id="out">RUNNING</pre>
+<canvas id="c" width="1500" height="900"></canvas>
+<script src="js/ocr/parse.js"></script>
+<script src="js/ocr/merge.js"></script>
+<script src="js/ocr/pair.js"></script>
+<script src="js/ocr/recognizer.js"></script>
+<script>
+// 合成商品卡片：深色卡片，价格白字，折扣红涨绿跌带箭头，底部浅色名称条。
+const cards = [
+    ['冬虫夏笋货组', 1367, -31.6], ['锚点矿石', 2240, 12], ['竹笋罐头', 1800, -10],
+    ['工业零件', 2100, 5], ['精炼铁锭', 1950, -2.5], ['荧光苔藓', 2400, 20]
+];
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+ctx.fillStyle = '#1b1d22'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+cards.forEach(([name, price, disc], i) => {
+    const x = 60 + (i % 3) * 480, y = 50 + Math.floor(i / 3) * 420;
+    ctx.fillStyle = '#2c2f36'; ctx.fillRect(x, y, 420, 370);
+    ctx.strokeStyle = '#6a6f7a'; ctx.lineWidth = 3; ctx.strokeRect(x, y, 420, 370);
+    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 40px Arial';
+    ctx.fillText(String(price), x + 30, y + 250);
+    ctx.fillStyle = disc > 0 ? '#e5484d' : '#2fb36b';
+    ctx.font = 'bold 34px Arial';
+    ctx.fillText((disc > 0 ? '▲' : '▼') + Math.abs(disc) + '%', x + 220, y + 250);
+    // 名称条高度约为画面宽度的 3%，与真实截图比例一致
+    ctx.fillStyle = '#d9dbe0'; ctx.fillRect(x, y + 310, 420, 44);
+    ctx.fillStyle = '#16181c'; ctx.font = 'bold 30px "Microsoft YaHei", sans-serif';
+    ctx.fillText(name, x + 30, y + 343);
+});
+
+(async () => {
+    const out = document.getElementById('out');
+    const log = [];
+    const t0 = performance.now();
+    try {
+        const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+        const file = new File([blob], 'cards.png', { type: 'image/png' });
+
+        // 取消后重试：第一次在加载中取消，必须以 CancelledError 结束。
+        const s1 = OcrRecognizer.createSession();
+        const p1 = s1.run(file);
+        setTimeout(() => s1.cancel(), 50);
+        try { await p1; log.push('FAIL cancel: resolved'); }
+        catch (e) { log.push(e instanceof OcrRecognizer.CancelledError ? 'ok   cancel -> CancelledError' : 'FAIL cancel: ' + e.message); }
+
+        const session = OcrRecognizer.createSession({ onProgress: p => { if (p.progress === 1) log.push('     stage done: ' + p.label); } });
+        const items = await session.run(file);
+        await session.dispose();
+        log.push('     elapsed ' + Math.round(performance.now() - t0) + 'ms');
+        log.push('     result ' + JSON.stringify(items));
+        const keysOk = items.every(it => Object.keys(it).join() === 'name,price,discount');
+        log.push((keysOk ? 'ok  ' : 'FAIL') + ' result keys only name/price/discount');
+        let correct = 0;
+        cards.forEach(([name, price, disc]) => {
+            const hit = items.find(it => it.name === name);
+            const ok = hit && hit.price === price && hit.discount === disc;
+            if (ok) correct++;
+            log.push((ok ? 'ok  ' : 'MISS') + ' ' + name + ' expected ' + price + ' ' + disc + ' got ' + JSON.stringify(hit || null));
+        });
+        // 串价检查：任何返回的价格都不能属于另一张卡片
+        const cross = items.filter(it => { const own = cards.find(c => c[0] === it.name); return own && it.price !== null && it.price !== own[1]; });
+        log.push((cross.length ? 'FAIL' : 'ok  ') + ' no cross-card prices');
+        // 名称未识别的卡片必须以 name:null 出现，且价格/折扣属于某张真实卡片
+        items.filter(it => it.name === null).forEach(it => {
+            const owner = cards.find(c => c[1] === it.price);
+            const ok = !owner || it.discount === null || it.discount === owner[2];
+            log.push((ok ? 'ok  ' : 'FAIL') + ' unnamed card ' + JSON.stringify(it));
+        });
+        log.push('SCORE ' + correct + '/' + cards.length);
+    } catch (e) {
+        log.push('ERROR ' + (e && e.stack || e));
+    }
+    out.textContent = log.join('\n') + '\nDONE';
+    fetch('/result', { method: 'POST', body: out.textContent }).catch(() => {});
+})();
+</script>
+</body>
+</html>
