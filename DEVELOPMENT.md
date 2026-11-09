@@ -18,7 +18,7 @@ python -m http.server 8765 --bind 127.0.0.1 --directory docs
 
 浏览器打开 `http://127.0.0.1:8765/`，停止服务使用 `Ctrl+C`。修改 HTML、CSS 或 JavaScript 后刷新页面即可；资源缓存导致修改未显示时，使用强制刷新。
 
-使用 HTTP 服务进行开发和 OCR 调试，避免直接双击 HTML 时文件协议对 Worker、模型加载及存储行为造成影响。页面仍需访问 `https://unpkg.com/vue@3/dist/vue.global.js` 加载 Vue，因此当前版本不能保证完全离线运行；OCR 资源则使用仓库内文件。
+使用 HTTP 服务进行开发和 OCR 调试，避免直接双击 HTML 时文件协议对 Worker、模型加载及存储行为造成影响。OCR 资源则使用仓库内文件。
 
 ### 同时访问网页与测试页面
 
