@@ -1,1 +1,4 @@
 .DS_Store
+/coverage/
+/tests/.last-result.txt
+**/__pycache__/

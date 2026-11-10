@@ -1,4 +1,37 @@
 const { createApp } = Vue;
+
+// 图片导入会话不放入响应式数据：Worker 对象无需被 Vue 代理。
+let importSession = null;
+const emptyImportState = () => ({ status: 'idle', file: null, previewUrl: '', rows: [], error: '', dragging: false, progress: { label: '', progress: 0 } });
+
+function readStorage(key) {
+    try {
+        return localStorage.getItem(key);
+    } catch (error) {
+        console.warn('Error on loading local data：' + key, error);
+        return null;
+    }
+}
+function writeStorage(key, value) {
+    try {
+        localStorage.setItem(key, value);
+    } catch (error) {
+        console.warn('Error on saving local data：' + key, error);
+    }
+}
+// Damaged stored data will return null，the page starts with empty data
+function readStoredArray(key) {
+    const raw = readStorage(key);
+    if (raw === null) return null;
+    try {
+        const value = JSON.parse(raw);
+        return Array.isArray(value) ? value : null;
+    } catch (error) {
+        console.warn('Local data is damaged and ignored：' + key, error);
+        return null;
+    }
+}
+
 createApp({
     data() {
         const defaultBasePrice = 2000;
@@ -24,20 +57,34 @@ createApp({
             newFriend: { name: '', discounts: {} },
             quantity: 1,
             basePrice: defaultBasePrice,  // 统一基础价格，方便后续修改和扩展
+            importState: emptyImportState(),
         }
     },
     mounted() {
         // Load data already stored in browser
-        const savedProducts = localStorage.getItem('products');
-        if (savedProducts) this.products = JSON.parse(savedProducts);
+        const savedProducts = readStoredArray('products');
+        if (savedProducts) this.products = savedProducts;
 
-        const savedFriends = localStorage.getItem('friends');
-        if (savedFriends) this.friends = JSON.parse(savedFriends);
+        const savedFriends = readStoredArray('friends');
+        if (savedFriends) this.friends = savedFriends;
 
-        const savedQuantity = localStorage.getItem('quantity');
-        if (savedQuantity) this.quantity = parseInt(savedQuantity);
+        const savedQuantity = parseInt(readStorage('quantity'), 10);
+        if (Number.isFinite(savedQuantity)) this.quantity = savedQuantity;
+    },
+    beforeUnmount() {
+        document.removeEventListener('paste', this.onImportPaste);
     },
     computed: {
+        importErrors() {
+            return OcrMerge.rowErrors(this.importState.rows);
+        },
+        importPlan() {
+            return OcrMerge.planImport(this.importState.rows.filter(row => !this.importErrors[row.id]), this.products, this.basePrice);
+        },
+        canConfirmImport() {
+            const checked = this.importState.rows.filter(row => row.checked);
+            return this.importState.status !== 'running' && checked.length > 0 && !Object.keys(this.importErrors).length;
+        },
         activeProduct() {
             return this.products.includes(this.selectedProduct) ? this.selectedProduct : this.products[0] || null;
         },
@@ -138,6 +185,7 @@ createApp({
             this.$nextTick(() => this.$refs.dialogName.focus());
         },
         closeDialog() {
+            if (this.dialog === 'import') this.resetImport();
             this.dialog = null;
             this.formError = '';
             this.$nextTick(() => {
@@ -151,6 +199,91 @@ createApp({
             if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
             else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
         },
+        // 图片导入 
+        openImportDialog() {
+            this.resetImport();
+            document.addEventListener('paste', this.onImportPaste);
+            this.openDialog('import');
+        },
+        resetImport() {
+            document.removeEventListener('paste', this.onImportPaste);
+            if (importSession) { importSession.dispose(); importSession = null; }
+            if (this.importState.previewUrl) URL.revokeObjectURL(this.importState.previewUrl);
+            this.importState = emptyImportState();
+        },
+        onImportFileChange(event) {
+            const file = event.target.files && event.target.files[0];
+            event.target.value = '';
+            if (file) this.setImportFile(file);
+        },
+        onImportDrop(event) {
+            this.importState.dragging = false;
+            const file = event.dataTransfer && event.dataTransfer.files[0];
+            if (file) this.setImportFile(file);
+        },
+        onImportPaste(event) {
+            if (this.dialog !== 'import' || this.importState.status === 'running') return;
+            const item = [...(event.clipboardData ? event.clipboardData.items : [])].find(entry => entry.kind === 'file' && entry.type.startsWith('image/'));
+            if (!item) return;
+            event.preventDefault();
+            this.setImportFile(item.getAsFile());
+        },
+        setImportFile(file) {
+            if (!OcrRecognizer.ACCEPTED_TYPES.includes(file.type)) {
+                this.importState.error = '仅支持 JPEG、PNG、WebP 图片。';
+                return;
+            }
+            if (this.importState.status === 'running') this.cancelRecognition();
+            if (this.importState.previewUrl) URL.revokeObjectURL(this.importState.previewUrl);
+            this.importState.file = file;
+            this.importState.previewUrl = URL.createObjectURL(file);
+            this.importState.rows = [];
+            this.startRecognition();
+        },
+        async startRecognition() {
+            const state = this.importState;
+            if (!state.file) return;
+            if (!importSession) importSession = OcrRecognizer.createSession({ expectedBase: this.basePrice, onProgress: progress => { if (this.importState === state) state.progress = progress; } });
+            const session = importSession;
+            state.status = 'running';
+            state.error = '';
+            state.rows = [];
+            state.progress = { label: '准备图片', progress: 0 };
+            try {
+                const items = await session.run(state.file);
+                if (this.importState !== state || importSession !== session) return; // 过期任务不写回
+                state.rows = OcrMerge.buildRows(items, this.products);
+                state.status = 'done';
+                if (!items.length) state.error = '没有识别到商品，请上传更清晰的截图后重试。';
+            } catch (error) {
+                if (this.importState !== state) return;
+                state.status = 'idle';
+                if (!(error instanceof OcrRecognizer.CancelledError)) state.error = error.message || '识别失败，请重试。';
+            }
+        },
+        cancelRecognition() {
+            if (importSession) importSession.cancel();
+            this.importState.status = 'idle';
+        },
+        toggleAllImportRows(checked) {
+            this.importState.rows.forEach(row => { row.checked = checked; });
+        },
+        importMatch(row) {
+            return OcrMerge.matchProduct(row.name, this.products);
+        },
+        importPriceMismatch(row) {
+            return OcrMerge.priceMismatch(row, this.products, this.basePrice);
+        },
+        confirmImport() {
+            if (!this.canConfirmImport) return;
+            const { updates, additions } = OcrMerge.planImport(this.importState.rows, this.products, this.basePrice);
+            if (!confirm(`将新增 ${additions.length} 件、更新 ${updates.length} 件商品，确认导入？`)) return;
+            updates.forEach(({ index, discount }) => { this.products[index].discount = discount; });
+            additions.forEach(product => this.products.push(product));
+            this.saveProducts();
+            this.closeDialog();
+        },
+
         submitProduct() {
             const name = this.newProduct.name.trim();
             if (!name) { this.formError = '请填写商品名称。'; return; }
@@ -210,7 +343,7 @@ createApp({
         },
         saveProducts() {
             const toSave = this.products.map(p => ({ name: p.name, basePrice: p.basePrice, discount: p.discount }));
-            localStorage.setItem('products', JSON.stringify(toSave));
+            writeStorage('products', JSON.stringify(toSave));
         },
         addFriend() {
             if (!this.newFriend.name) return;
@@ -223,7 +356,7 @@ createApp({
             this.saveFriends();
         },
         saveFriends() {
-            localStorage.setItem('friends', JSON.stringify(this.friends));
+            writeStorage('friends', JSON.stringify(this.friends));
         },
         calcPrice(item, discount) {
             return item.basePrice * (1 + item.discount / 100) * (1 + (discount || 0) / 100);
@@ -267,7 +400,7 @@ createApp({
             }
         },
         saveQuantity(){
-            localStorage.setItem('quantity', this.quantity);
+            writeStorage('quantity', this.quantity);
         }
     }
 }).mount('#app');

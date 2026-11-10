@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>终末地商品收益计算工具</title>
-  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="https://unpkg.com/vue@3.5.45/dist/vue.global.js"></script>
   <link rel="stylesheet" href="./css/style.css">
 </head>
 <body>
@@ -98,7 +98,7 @@
 
         <section v-show="currentView === 'manage'" aria-label="商品管理">
           <section class="management-panel">
-            <div class="management-toolbar"><label class="search"><span aria-hidden="true">⌕</span><input type="search" v-model="librarySearch" placeholder="搜索商品名称" aria-label="搜索商品库"></label><button class="primary-button" type="button" @click="openProductDialog()">＋ 新建商品</button></div>
+            <div class="management-toolbar"><label class="search"><span aria-hidden="true">⌕</span><input type="search" v-model="librarySearch" placeholder="搜索商品名称" aria-label="搜索商品库"></label><div class="toolbar-actions"><button class="secondary-button" type="button" @click="openImportDialog">图片导入</button><button class="primary-button" type="button" @click="openProductDialog()">＋ 新建商品</button></div></div>
             <div class="table-wrap"><table><thead><tr><th>商品名称</th><th class="number">基础价格</th><th class="number">我的折扣比</th><th class="number">实际价格</th><th class="number">操作</th></tr></thead><tbody>
               <tr v-for="entry in libraryProducts" :key="entry.index"><td class="product-name">{{ entry.product.name }}</td><td class="number price">{{ money(entry.product.basePrice) }}</td><td class="number">{{ entry.product.discount || 0 }}%</td><td class="number price">{{ money(ownPrice(entry.product)) }}</td><td><div class="management-actions"><button class="text-button" type="button" @click="openProductDialog(entry.index)">编辑</button><button class="text-button danger-text" type="button" @click="removeProduct(entry.index)">删除</button></div></td></tr>
               <tr v-if="!libraryProducts.length"><td colspan="5" class="empty">{{ products.length ? '没有找到匹配的商品' : '暂无商品，点击“新建商品”开始添加。' }}</td></tr>
@@ -124,7 +124,50 @@
       </main>
     </div>
 
-    <div v-if="dialog" class="modal-backdrop" @click.self="closeDialog" @keydown.esc.stop="closeDialog" @keydown.tab="trapDialogFocus">
+    <div v-if="dialog === 'import'" class="modal-backdrop" @click.self="closeDialog" @keydown.esc.stop="closeDialog" @keydown.tab="trapDialogFocus">
+      <section class="add-dialog import-dialog" role="dialog" aria-modal="true" aria-labelledby="importTitle" aria-describedby="importHint" tabindex="-1" ref="dialogPanel">
+        <header class="dialog-header"><div><h2 id="importTitle">图片导入</h2><p class="dialog-subtitle" id="importHint">上传游戏截图，识别商品名称与我的折扣比。图片仅在本机浏览器中处理。</p></div><button class="icon-button" type="button" aria-label="关闭窗口" @click="closeDialog">×</button></header>
+        <p v-if="importState.error" class="dialog-error" role="alert">{{ importState.error }}</p>
+        <div class="import-body">
+          <div class="import-source" :class="{ dragging: importState.dragging }" @dragover.prevent="importState.dragging = true" @dragleave.prevent="importState.dragging = false" @drop.prevent="onImportDrop">
+            <img v-if="importState.previewUrl" :src="importState.previewUrl" alt="待识别图片预览" class="import-preview">
+            <p v-else class="import-placeholder">拖入图片、粘贴截图（Ctrl+V），或</p>
+            <div class="import-source-actions">
+              <button class="secondary-button" type="button" ref="dialogName" :disabled="importState.status === 'running'" @click="$refs.importFile.click()">{{ importState.previewUrl ? '更换图片' : '选择图片' }}</button>
+              <button v-if="importState.previewUrl && importState.status !== 'running'" class="secondary-button" type="button" @click="startRecognition">重新识别</button>
+            </div>
+            <input ref="importFile" type="file" accept="image/jpeg,image/png,image/webp" hidden @change="onImportFileChange">
+            <p class="form-hint">推荐使用游戏内截图，拍照识别准确率可能较低。支持 JPEG、PNG、WebP。首次识别需加载模型。</p>
+          </div>
+          <div class="import-result">
+            <div v-if="importState.status === 'running'" class="import-progress" aria-live="polite">
+              <div class="import-progress-label"><span>{{ importState.progress.label }}</span><span>{{ Math.round(importState.progress.progress * 100) }}%</span></div>
+              <div class="import-progress-bar"><span :style="{ width: (importState.progress.progress * 100) + '%' }"></span></div>
+              <button class="secondary-button" type="button" @click="cancelRecognition">取消识别</button>
+            </div>
+            <template v-else-if="importState.rows.length">
+              <div class="table-wrap import-table"><table><thead><tr><th><input type="checkbox" :checked="importState.rows.every(r => r.checked)" @change="toggleAllImportRows($event.target.checked)" aria-label="全选"></th><th>商品名称</th><th class="number">识别售价</th><th class="number">折扣比（%）</th></tr></thead><tbody>
+                <tr v-for="row in importState.rows" :key="row.id" :class="{ 'row-error': importErrors[row.id] }">
+                  <td><input type="checkbox" v-model="row.checked" :aria-label="'导入 ' + (row.name || '未命名商品')"></td>
+                  <td>
+                    <input class="inline-input" v-model="row.name" placeholder="未识别，请填写" :aria-label="'商品名称 ' + (row.id + 1)">
+                    <span class="import-tag" :class="importMatch(row).exactIndex !== -1 ? 'update' : 'new'">{{ importMatch(row).exactIndex !== -1 ? '更新' : '新增' }}</span>
+                    <span v-if="importMatch(row).candidates.length" class="import-candidates">近似：<button v-for="name in importMatch(row).candidates" :key="name" type="button" class="text-button" @click="row.name = name">{{ name }}</button></span>
+                    <span v-if="importErrors[row.id]" class="import-error">{{ importErrors[row.id] }}</span>
+                  </td>
+                  <td class="number price" :class="{ 'price-mismatch': importPriceMismatch(row) }" :title="importPriceMismatch(row) ? '与按基础价和折扣算出的价格不一致，请核对折扣' : ''">{{ row.price === null ? '—' : row.price }}</td>
+                  <td class="number"><label class="quote-input"><input type="number" step="any" v-model.number="row.discount" placeholder="未识别" :aria-label="'折扣比 ' + (row.id + 1)"><span>%</span></label></td>
+                </tr>
+              </tbody></table></div>
+            </template>
+            <p v-else class="empty">{{ importState.previewUrl ? '识别已停止，可重新识别或更换图片。' : '选择图片后自动开始识别。' }}</p>
+          </div>
+        </div>
+        <footer class="dialog-footer"><span class="dialog-footer-note">{{ importState.rows.length ? '将新增 ' + importPlan.additions.length + ' 件、更新 ' + importPlan.updates.length + ' 件商品' : '确认前不会修改商品。' }}</span><div class="dialog-actions"><button class="secondary-button" type="button" @click="closeDialog">取消</button><button class="primary-button" type="button" :disabled="!canConfirmImport" @click="confirmImport">确认导入</button></div></footer>
+      </section>
+    </div>
+
+    <div v-if="dialog && dialog !== 'import'" class="modal-backdrop" @click.self="closeDialog" @keydown.esc.stop="closeDialog" @keydown.tab="trapDialogFocus">
       <section class="add-dialog" :class="{ 'friend-dialog': dialog === 'friend' }" role="dialog" aria-modal="true" aria-labelledby="dialogTitle" aria-describedby="dialogHint" tabindex="-1" ref="dialogPanel">
         <form @submit.prevent="dialog === 'product' ? submitProduct() : submitFriend()">
           <header class="dialog-header"><div><h2 id="dialogTitle">{{ dialog === 'friend' ? '新增好友' : editingProductIndex === null ? '添加商品' : '编辑商品' }}</h2><p class="dialog-subtitle" id="dialogHint">{{ dialog === 'friend' ? '填写好友名称与各商品的报价折扣比。' : '填写商品信息，好友报价和收益将实时计算。' }}</p></div><button class="icon-button" type="button" aria-label="关闭窗口" @click="closeDialog">×</button></header>
@@ -147,6 +190,10 @@
     </div>
   </div>
 
+  <script src="./js/ocr/parse.js"></script>
+  <script src="./js/ocr/merge.js"></script>
+  <script src="./js/ocr/pair.js"></script>
+  <script src="./js/ocr/recognizer.js"></script>
   <script src="./js/app.js"></script>
 </body>
 </html>

@@ -312,3 +312,38 @@ body:has(.modal-backdrop) { overflow: hidden; }
   .dialog-error { margin-left: 16px; margin-right: 16px; }
 }
 
+
+/* 图片导入 */
+.toolbar-actions { display: flex; gap: 8px; margin-left: auto; }
+.import-dialog { width: min(1040px, 100%); }
+.import-body { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 20px; padding: 22px 24px; }
+.import-source { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 220px; padding: 14px; border: 1.5px dashed var(--line); border-radius: 12px; background: var(--surface-subtle); text-align: center; }
+.import-source.dragging { border-color: var(--primary); background: var(--primary-soft); }
+.import-preview { max-width: 100%; max-height: 300px; border-radius: 8px; object-fit: contain; }
+.import-placeholder { margin: 0; color: var(--muted); }
+.import-source-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.import-result { min-width: 0; }
+.import-progress { display: grid; gap: 10px; padding: 18px 4px; }
+.import-progress-label { display: flex; justify-content: space-between; color: var(--muted); font-size: 14px; }
+.import-progress-bar { height: 8px; overflow: hidden; border-radius: 99px; background: var(--line); }
+.import-progress-bar span { display: block; height: 100%; background: var(--primary); transition: width .2s; }
+.import-progress .secondary-button { justify-self: start; }
+.import-table { max-height: 420px; overflow-y: auto; }
+.import-table td { vertical-align: top; }
+.import-table .inline-input { width: 100%; min-width: 140px; }
+.import-tag { display: inline-block; margin-top: 4px; padding: 1px 7px; border-radius: 99px; font-size: 12px; }
+.import-tag.update { color: var(--primary); background: var(--primary-soft); }
+.import-tag.new { color: var(--teal); background: var(--teal-soft); }
+.import-candidates { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
+.import-candidates .text-button { padding: 0 4px; font-size: 12px; }
+.import-error { display: block; margin-top: 4px; color: var(--positive); font-size: 12px; }
+.row-error td { background: var(--positive-soft); }
+.price-mismatch { color: var(--warning); text-decoration: underline dotted; }
+.primary-button:disabled { opacity: .5; cursor: not-allowed; }
+@media (max-width: 940px) {
+  .import-body { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .import-body { padding-right: 16px; padding-left: 16px; }
+  .toolbar-actions { margin-left: 0; width: 100%; }
+}
