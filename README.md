@@ -1,6 +1,12 @@
 # Endfield-Friend-Price-Difference-Calculator
 
+<p align="center">
+  <img src="./docs/assets/logo.svg" alt="终末地工具 Logo" width="72" height="72">
+</p>
+
 《明日方舟 终末地》物资调度 弹性需求物品 好友价格差价计算器
+
+本项目为玩家制作的免费辅助工具，与《明日方舟：终末地》官方无关联。
 
 ## OCR 图片导入
 
