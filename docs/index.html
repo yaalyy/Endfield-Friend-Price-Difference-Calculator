@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>终末地商品收益计算工具</title>
+  <link rel="icon" href="./favicon.ico" type="image/x-icon">
+  <link rel="icon" href="./assets/logo.svg" type="image/svg+xml">
   <script src="https://unpkg.com/vue@3.5.45/dist/vue.global.js"></script>
   <link rel="stylesheet" href="./css/style.css">
 </head>
@@ -12,7 +14,7 @@
   <div id="app" v-cloak>
     <div class="app-shell">
       <aside class="sidebar">
-        <div class="brand"><span class="brand-mark" aria-hidden="true">△</span>终末地工具</div>
+        <div class="brand"><img class="brand-mark" src="./assets/logo.svg" width="30" height="30" alt="">终末地工具</div>
         <div class="nav-label">价格计算</div>
         <nav class="nav" aria-label="主导航">
           <button v-for="view in views" :key="view.id" type="button" :class="{ active: currentView === view.id }" :aria-current="currentView === view.id ? 'page' : null" @click="currentView = view.id"><span class="nav-icon" aria-hidden="true">{{ view.icon }}</span>{{ view.label }}</button>
@@ -23,6 +25,7 @@
         </div>
       </aside>
       <nav class="mobile-nav" aria-label="移动端导航">
+        <div class="mobile-brand"><img class="brand-mark" src="./assets/logo.svg" width="30" height="30" alt="">终末地工具</div>
         <button v-for="view in views" :key="view.id" type="button" :class="{ active: currentView === view.id }" :aria-current="currentView === view.id ? 'page' : null" @click="currentView = view.id">{{ view.label }}</button>
         <button class="reset-button" type="button" @click="resetData">重置</button>
       </nav>
@@ -121,6 +124,7 @@
             <div class="footer-note">好友报价 = 我的价格 ×（1 + 好友折扣比 / 100）· 未填写的好友折扣按 0% 计算</div>
           </section>
         </section>
+        <footer class="site-footer"><p>本项目为玩家制作的免费辅助工具，与《明日方舟：终末地》官方无关联。</p></footer>
       </main>
     </div>
 
