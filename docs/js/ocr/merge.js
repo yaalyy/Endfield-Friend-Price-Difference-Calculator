@@ -42,9 +42,7 @@
         return { exactIndex, candidates };
     }
 
-    function isValidDiscount(value) {
-        return typeof value === 'number' && Number.isFinite(value) && value > -100 && value < 100;
-    }
+    const isValidDiscount = P.isValidDiscount;
 
     function isValidName(name) {
         return typeof name === 'string' && name.trim().length > 0;

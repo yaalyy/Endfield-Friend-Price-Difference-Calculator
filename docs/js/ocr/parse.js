@@ -40,6 +40,10 @@
         return 0;
     }
 
+    function isValidDiscount(value) {
+        return typeof value === 'number' && Number.isFinite(value) && value > -100;
+    }
+
 
     // colorSign: sign from colour to determine positive or negative
     // textsign and colorsign must be matched
@@ -56,7 +60,7 @@
 
         const sign = textSign(s);  // sign from price, instead of colour
         const digits = fixDigits(s.replace(/[-−–—▼↓▽+▲↑△]/g, '')).replace(/,/g, '.');
-        const match = digits.match(/^(\d{1,2})(?:\.(\d))?$/);  // only accept 1-2 digit integer + optional 1 decimal place
+        const match = digits.match(/^(\d+)(?:\.(\d))?$/);
         if (!match) return null;
 
         const magnitude = Number(match[2] === undefined ? match[1] : match[1] + '.' + match[2]);
@@ -67,7 +71,8 @@
         const finalSign = sign || colorSign;
         if (!finalSign) return null;
 
-        return finalSign * magnitude;
+        const value = finalSign * magnitude;
+        return isValidDiscount(value) ? value : null;
     }
 
     // clean up name string, such as space, non-chinese or non-english characters
@@ -83,7 +88,7 @@
         return (String(text || '').match(/[一-鿿]/g) || []).length;
     }
 
-    const api = { toHalfWidth, parsePrice, parseDiscount, textSign, cleanName, cjkCount };
+    const api = { toHalfWidth, parsePrice, parseDiscount, isValidDiscount, textSign, cleanName, cjkCount };
     root.OcrParse = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof self !== 'undefined' ? self : this);

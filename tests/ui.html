@@ -29,10 +29,10 @@ async function until(fn, ms = 60000) { const t = Date.now(); while (Date.now() -
         win.addEventListener('unhandledrejection', e => errors.push(String(e.reason)));
 
         const items = [
-            { name: '龙泡泡浮空艇货组', price: 3853, discount: 92.7 },
+            { name: '龙泡泡浮空艇货组', price: 5074, discount: 153.7 },
             { name: '武侠电影货组', price: 3556, discount: 77.8 },
             { name: '选剑铸炉货组', price: 3482, discount: 74.1 },
-            { name: '冬虫夏笋货组', price: 2738, discount: 36.9 },
+            { name: '冬虫夏笋货组', price: null, discount: null },
             { name: '息壤色烟花货组', price: 2473, discount: 23.6 },
             { name: '岳研避瘴茶货组', price: 2452, discount: 22.6 },
             { name: '武陵冻梨货组', price: 1895, discount: -5.3 }
@@ -85,6 +85,8 @@ async function until(fn, ms = 60000) { const t = Date.now(); while (Date.now() -
 
         // 只保留一行新增 + 一行更新，其它取消勾选，验证部分勾选
         const rowList = [...doc.querySelectorAll('.import-table tbody tr')];
+        const largeIncreaseRow = rowList.find(tr => tr.querySelector('.inline-input').value === '龙泡泡浮空艇货组');
+        ok(largeIncreaseRow.querySelector('input[type=checkbox]').checked, 'recognized increase above 100 percent selected by default');
         let keptNew = null;
         rowList.forEach(tr => {
             const name = tr.querySelector('.inline-input').value;
@@ -104,7 +106,12 @@ async function until(fn, ms = 60000) { const t = Date.now(); while (Date.now() -
         ok(confirmBtn.disabled && doc.querySelector('.import-error'), 'duplicate name blocks confirm: ' + (doc.querySelector('.import-error') || {}).textContent);
         nameInput.value = '冬虫夏笋货组'; nameInput.dispatchEvent(new win.Event('input'));
         await wait(100);
-        ok(!confirmBtn.disabled, 'confirm enabled after fixing name');
+        ok(confirmBtn.disabled && newRow.querySelector('.import-error').textContent === '折扣无效', 'missing discount blocks confirm even after fixing name');
+        ok(newRow.querySelector('td.price').textContent.trim() === '—', 'unrecognized price stays empty');
+        const discountInput = newRow.querySelector('input[type=number]');
+        discountInput.value = '153'; discountInput.dispatchEvent(new win.Event('input'));
+        await wait(100);
+        ok(!confirmBtn.disabled && !newRow.querySelector('.import-error'), 'manually filling 153 enables import without a recognized price');
 
         win.confirm = () => true;
         confirmBtn.click();
@@ -115,7 +122,7 @@ async function until(fn, ms = 60000) { const t = Date.now(); while (Date.now() -
         const add = saved.find(p => p.name === '冬虫夏笋货组');
         ok(saved.length === 2, 'only checked rows saved');
         ok(upd && upd.basePrice === 1800 && upd.discount === 77.8, 'update keeps basePrice 1800, discount 77.8');
-        ok(add && add.basePrice === 2000 && add.discount === 36.9, 'new product basePrice 2000, discount 36.9');
+        ok(add && add.basePrice === 2000 && add.discount === 153, 'new product saves manually filled discount 153 with basePrice 2000');
         ok(saved.every(p => Object.keys(p).join() === 'name,basePrice,discount'), 'product shape unchanged');
         ok(JSON.parse(localStorage.getItem('friends'))[0].discounts['武侠电影货组'] === 5, 'friend discounts untouched');
         ok(!doc.querySelector('.import-dialog'), 'dialog closed after import');

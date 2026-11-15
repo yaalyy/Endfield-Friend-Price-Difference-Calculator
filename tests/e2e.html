@@ -16,7 +16,7 @@
 <script>
 // 合成商品卡片：深色卡片，价格白字，折扣红涨绿跌带箭头，底部浅色名称条。
 const cards = [
-    ['冬虫夏笋货组', 1367, -31.6], ['锚点矿石', 2240, 12], ['竹笋罐头', 1800, -10],
+    ['冬虫夏笋货组', 1367, -31.6], ['锚点矿石', 5060, 153], ['竹笋罐头', 1800, -10],
     ['工业零件', 2100, 5], ['精炼铁锭', 1950, -2.5], ['荧光苔藓', 2400, 20]
 ];
 const canvas = document.getElementById('c');
@@ -59,6 +59,7 @@ cards.forEach(([name, price, disc], i) => {
         log.push('     result ' + JSON.stringify(items));
         const keysOk = items.every(it => Object.keys(it).join() === 'name,price,discount');
         log.push((keysOk ? 'ok  ' : 'FAIL') + ' result keys only name/price/discount');
+        log.push((items.some(it => it.price === 5060 && it.discount === 153) ? 'ok  ' : 'FAIL') + ' real OCR recognizes price 5060 and increase 153 percent');
         let correct = 0;
         cards.forEach(([name, price, disc]) => {
             const hit = items.find(it => it.name === name);
