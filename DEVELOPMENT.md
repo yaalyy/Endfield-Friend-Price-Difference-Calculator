@@ -93,6 +93,9 @@ python tests/run.py app ui
 # 真实 OCR 测试，默认测试集不包含它
 python tests/run.py e2e
 
+# 完整测试
+python tests/run.py unit app ui e2e
+
 # 使用本机已安装的 Edge，无需安装 Playwright Chromium
 python --browser msedge
 
