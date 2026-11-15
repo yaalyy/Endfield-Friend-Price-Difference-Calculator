@@ -28,7 +28,15 @@
     test('discount: text/color conflict -> null', () => expect(P.parseDiscount('+31.6%', -1), null));
     test('discount: zero needs no sign', () => expect(P.parseDiscount('0%'), 0));
     test('discount: requires percent', () => expect(P.parseDiscount('-31.6'), null));
-    test('discount: rejects >= 100', () => expect(P.parseDiscount('-100%'), null));
+    test('discount: positive increases can reach and exceed 100 percent', () => expect(
+        ['+100%', '+153%', '▲157.8%', '+1234.5%'].map(text => P.parseDiscount(text)), [100, 153, 157.8, 1234.5]));
+    test('discount: large increases from color and pill fallback', () => expect(
+        [P.parseDiscount('153%', 1), P.parseDiscount('157.8', 1, { requirePercent: false }), P.parseDiscount('＋１５３．０％')], [153, 157.8, 153]));
+    test('discount: rejects decreases of 100 percent or more', () => expect(
+        [P.parseDiscount('-99.9%'), P.parseDiscount('-100%'), P.parseDiscount('-153%'), P.parseDiscount('153%', -1)], [-99.9, null, null, null]));
+    test('discount: large increases still require an unambiguous sign', () => expect(
+        [P.parseDiscount('153%'), P.parseDiscount('+153%', -1)], [null, null]));
+    test('discount: rejects overflow', () => expect(P.parseDiscount('+' + '9'.repeat(400) + '%'), null));
     test('discount: rejects two decimals', () => expect(P.parseDiscount('-3.16%'), null));
     test('discount: full width', () => expect(P.parseDiscount('－３１．６％'), -31.6));
     test('discount: misread arrow prefix uses color', () => expect([P.parseDiscount('V31.6%', -1), P.parseDiscount('A12%', 1), P.parseDiscount('了10%', -1), P.parseDiscount('A12%')], [-31.6, 12, -10, null]));
@@ -74,6 +82,11 @@
         const items = Pair.pairFields(lines, () => -1);
         expect(items[0].discount, -31.6);
     });
+    test('pair: large increase keeps its matching price', () => {
+        const lines = [{ words: [word('5060', 40, 300, 160, 340), word('153%', 200, 300, 320, 340)] }, { words: [word('选剑铸炉货组', 20, 380, 340, 420)] }];
+        const items = Pair.pairFields(lines, () => 1).map(({ name, price, discount }) => ({ name, price, discount }));
+        expect(items, [{ name: '选剑铸炉货组', price: 5060, discount: 153 }]);
+    });
     test('pair: placeholder name still pairs values', () => {
         const lines = [{ words: [word('2400', 40, 300, 160, 340), word('+20%', 200, 300, 320, 340)] }, { words: [{ text: '', bbox: { x0: 20, y0: 380, x1: 340, y1: 420 }, confidence: 0, placeholder: true }] }];
         const items = Pair.pairFields(lines).map(({ name, price, discount }) => ({ name, price, discount }));
@@ -100,6 +113,9 @@
 
     // ---------- 导入合并 ----------
     const products = [{ name: '冬虫夏笋货组', basePrice: 2000, discount: 0 }, { name: '竹笋', basePrice: 1500, discount: 3 }];
+    test('discount validation: positive upper limit removed, invalid values rejected', () => expect(
+        [-100, -99.9, 0, 100, 153, 157.8, 1234.5, '', '153', null, undefined, NaN, Infinity, -Infinity].map(M.isValidDiscount),
+        [false, true, true, true, true, true, true, false, false, false, false, false, false, false]));
     test('match: exact', () => expect(M.matchProduct('竹笋', products).exactIndex, 1));
     test('match: near candidates, no silent replace', () => {
         const m = M.matchProduct('冬虫夏笋货组。', products);
@@ -110,6 +126,16 @@
         const rows = M.buildRows([{ name: '竹笋', price: null, discount: -5 }, { name: '竹笋2', price: 1000, discount: null }, { name: null, price: 1000, discount: 2 }], products);
         expect(rows.map(r => r.checked), [true, false, false]);
         expect(rows[1].discount, '');
+    });
+    test('rows: recognized and manually filled large increases can be imported without a price', () => {
+        const rows = M.buildRows([{ name: '冬虫夏笋货组', price: 5060, discount: P.parseDiscount('+153%') }, { name: '新商品', price: null, discount: null }], products);
+        expect(rows.map(r => r.checked), [true, false]);
+        rows[1].discount = 153;
+        rows[1].checked = true;
+        expect(M.rowErrors(rows), {});
+        expect(M.planImport(rows, products, 2000), { updates: [{ index: 0, discount: 153 }], additions: [{ name: '新商品', basePrice: 2000, discount: 153 }] });
+        expect(M.priceMismatch(rows[0], products, 2000), false);
+        expect(M.priceMismatch({ ...rows[0], price: 2000 }, products, 2000), true);
     });
     test('errors: duplicate names among checked rows', () => {
         const rows = [{ id: 0, checked: true, name: 'A', discount: 1 }, { id: 1, checked: true, name: 'A ', discount: 2 }, { id: 2, checked: false, name: 'A', discount: 2 }];

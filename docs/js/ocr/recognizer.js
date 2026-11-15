@@ -261,7 +261,7 @@
             const text = data.text.trim();
             let value = P.parseDiscount(text, sign, { requirePercent: false });
             // 小号 % 可能被读成末尾多一位数字（92.79）：去掉末位后再试一次
-            if (value === null && /^\d{1,2}\.\d\d$/.test(text)) value = P.parseDiscount(text.slice(0, -1), sign, { requirePercent: false });
+            if (value === null && /^\d+\.\d\d$/.test(text)) value = P.parseDiscount(text.slice(0, -1), sign, { requirePercent: false });
             return value;
         }
 
