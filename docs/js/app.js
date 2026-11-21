@@ -33,6 +33,7 @@ function readStoredArray(key) {
 }
 
 createApp({
+    mixins: [GameCaptureVue],
     data() {
         const defaultBasePrice = 2000;
         return {
@@ -66,13 +67,14 @@ createApp({
         if (savedProducts) this.products = savedProducts;
 
         const savedFriends = readStoredArray('friends');
-        if (savedFriends) this.friends = savedFriends;
+        if (savedFriends) this.friends = GameCaptureModel.normalizeFriends(savedFriends);
 
         const savedQuantity = parseInt(readStorage('quantity'), 10);
         if (Number.isFinite(savedQuantity)) this.quantity = savedQuantity;
     },
     beforeUnmount() {
         document.removeEventListener('paste', this.onImportPaste);
+        this.resetImport();
     },
     computed: {
         importErrors() {
@@ -114,7 +116,7 @@ createApp({
 
             this.products.forEach(product => {
                 const maxDiffInfo = this.getMaxDiff(product, this.quantity);
-                if (maxDiffInfo.diff > maxDiff) {
+                if (this.bestFriendIndex(product) !== -1 && maxDiffInfo.diff > maxDiff) {
                     maxDiff = maxDiffInfo.diff;
                     maxDiffProduct = product;
                     maxDiffFriend = maxDiffInfo.friend;
@@ -147,20 +149,22 @@ createApp({
     },
     methods: {
         money(value) {
+            if (value === null) return '—';
             return Number(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         },
         bestPrice(product) {
-            return this.ownPrice(product) + this.getMaxDiff(product, 1).diff;
+            const best = this.bestFriendIndex(product);
+            return best === -1 ? null : this.friendPrice(product, this.friends[best]);
         },
         returnRate(product) {
             const own = this.ownPrice(product);
             return own ? this.getMaxDiff(product, 1).diff / own * 100 : 0;
         },
         bestFriendIndex(product) {
-            if (!this.friends.length) return -1;
-            let best = 0;
+            let best = -1;
             this.friends.forEach((friend, index) => {
-                if (this.calcPrice(product, friend.discounts[product.name]) > this.calcPrice(product, this.friends[best].discounts[product.name])) best = index;
+                const price = this.friendPrice(product, friend);
+                if (price !== null && (best === -1 || price > this.friendPrice(product, this.friends[best]))) best = index;
             });
             return best;
         },
@@ -182,9 +186,10 @@ createApp({
             this.dialogOpener = document.activeElement;
             this.formError = '';
             this.dialog = kind;
-            this.$nextTick(() => this.$refs.dialogName.focus());
+            this.$nextTick(() => { if (this.$refs.dialogName) this.$refs.dialogName.focus(); });
         },
         closeDialog() {
+            if (this.dialog === 'capture' && !this.closeCapture()) return;
             if (this.dialog === 'import') this.resetImport();
             this.dialog = null;
             this.formError = '';
@@ -201,6 +206,8 @@ createApp({
         },
         // 图片导入 
         openImportDialog() {
+            // avoid window capture and image import are being used at same time
+            if (this.dialog === 'capture' && !this.closeCapture()) return;
             this.resetImport();
             document.addEventListener('paste', this.onImportPaste);
             this.openDialog('import');
@@ -304,6 +311,10 @@ createApp({
                             friend.discounts[name] = friend.discounts[oldName];
                             delete friend.discounts[oldName];
                         }
+                        if (friend.quotes && Object.prototype.hasOwnProperty.call(friend.quotes, oldName)) {
+                            Object.defineProperty(friend.quotes, name, { value: friend.quotes[oldName], writable: true, configurable: true, enumerable: true });
+                            delete friend.quotes[oldName];
+                        }
                     });
                 }
                 Object.assign(product, this.newProduct);
@@ -335,6 +346,7 @@ createApp({
             this.products.splice(index, 1);
             this.friends.forEach(friend => {
                 delete friend.discounts[removedProduct.name];
+                if (friend.quotes) delete friend.quotes[removedProduct.name];
             });
             delete this.newFriend.discounts[removedProduct.name];
 
@@ -361,6 +373,13 @@ createApp({
         calcPrice(item, discount) {
             return item.basePrice * (1 + item.discount / 100) * (1 + (discount || 0) / 100);
         },
+        friendPrice(product, friend) {
+            return GameCaptureModel.friendPrice(product, friend);
+        },
+        friendDifference(product, friend) {
+            const price = this.friendPrice(product, friend);
+            return price === null ? null : price - this.ownPrice(product);
+        },
         getCellClass(value) {
             if (value > 0) return 'red';
             if (value < 0) return 'green';
@@ -372,11 +391,12 @@ createApp({
 
             const own = this.ownPrice(item);
             this.friends.forEach(friend => {
-                const fPrice = this.calcPrice(item, friend.discounts[item.name]);
+                const fPrice = this.friendPrice(item, friend);
+                if (fPrice === null) return;
                 const diff = (fPrice - own) * quantity;
                 if (diff > maxDiff) {
                     maxDiff = diff;
-                    maxFriend = friend.name;
+                    maxFriend = friend.source === 'game-capture' ? '游戏采集' : friend.name;
                 }
             });
             return { friend: maxFriend || '-', diff: maxDiff === -Infinity ? 0 : maxDiff };
