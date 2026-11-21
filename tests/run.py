@@ -1,9 +1,10 @@
 """Headless test runner: starts serve.py, opens each test page, reports failures, sets the exit code.
 
 Usage:
-    python tests/run.py                  # unit, app, ui
+    python tests/run.py                  # unit, app, ui, capture
     python tests/run.py app              # only tests/app.html
     python tests/run.py e2e              # real OCR (slow, not run by default)
+    python tests/run.py capture-ocr      # reference screenshots, real region OCR
     python tests/run.py -v               # print every line, not just failures
     python tests/run.py --browser msedge # use installed Edge instead of Playwright's Chromium
     python tests/run.py --headed         # show the browser window for debugging
@@ -23,8 +24,8 @@ import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TESTS = ROOT / 'tests'
-DEFAULT_PAGES = ['unit', 'app', 'ui']
-SLOW_PAGES = {'e2e': 300}
+DEFAULT_PAGES = ['unit', 'app', 'ui', 'capture']
+SLOW_PAGES = {'e2e': 300, 'capture-ocr': 300}
 # 每个测试页结束时在 #out 末行写入其中一个标记
 DONE_JS = r"""() => { const el = document.getElementById('out');
     return !!el && /^(ALL PASSED \d+|FAILED \d+|DONE)$/m.test(el.textContent); }"""
