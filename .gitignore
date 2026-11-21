@@ -2,3 +2,5 @@
 /coverage/
 /tests/.last-result.txt
 **/__pycache__/
+/.test-deps/
+/tests/.artifacts/
