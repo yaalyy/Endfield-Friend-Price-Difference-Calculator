@@ -422,5 +422,108 @@
         };
     }
 
-    root.OcrRecognizer = { createSession, CancelledError, ACCEPTED_TYPES };
+    // Fixed-frame region OCR settings.
+    const REGION = Object.freeze({
+        // Crops are downsampled to PROBE_WIDTH × PROBE_HEIGHT to check whether they contain any text.
+        PROBE_WIDTH: 96,
+        PROBE_HEIGHT: 32,
+        // Gray range (0-255) below which a crop is treated as blank and skipped.
+        MIN_CONTRAST: 12,
+        // Height, in pixels, that each crop is scaled to before recognition.
+        TARGET_HEIGHT: 72,
+        // Tesseract page segmentation mode 7: treat the image as a single text line.
+        PAGE_SEG_MODE: '7'
+    });
+    // Fixed-frame regions use the same preprocessing and local model assets, without File conversion.
+    function createRegionSession({ onProgress = () => {} } = {}) {
+        let worker = null, preparing = null, disposed = false, busy = false;
+        let cancelPending;
+        const cancelled = new Promise((resolve, reject) => { cancelPending = reject; });
+        cancelled.catch(() => {});
+        const cancellable = promise => Promise.race([promise, cancelled]);
+        async function prepare() {
+            if (disposed) throw new CancelledError();
+            if (worker) return;
+            if (!preparing) preparing = (async () => {
+                const T = await loadLibrary();
+                if (disposed) throw new CancelledError();
+                const created = await T.createWorker(['chi_sim', 'eng'], T.OEM.LSTM_ONLY, {
+                    workerPath: assetUrl('vendor/tesseract/worker.min.js'), corePath: assetUrl('vendor/tesseract/core/'),
+                    langPath: assetUrl('vendor/tesseract/lang'), workerBlobURL: false,
+                    logger: m => { if (!disposed && !worker) onProgress({ label: '模型加载中', progress: m.progress || 0 }); }
+                });
+                if (disposed) { await created.terminate(); throw new CancelledError(); }
+                worker = created;
+            })().catch(error => { preparing = null; throw error; });
+            return cancellable(preparing);
+        }
+        async function recognizeRegions(frame, regions) {
+            if (busy) throw new Error('区域识别会话忙碌');
+            busy = true;
+            try {
+                await prepare();
+                const results = {};
+                for (const [key, field] of Object.entries(regions)) {
+                    if (disposed) throw new CancelledError();
+                    // A uniform empty crop becomes a black rectangle under contrast stretching,
+                    // which can hallucinate border glyphs. Reject it before shared preprocessing.
+                    const bounds = clampRect(field.rect, frame);
+                    if (!bounds) { results[key] = { text: '', confidence: 0 }; continue; }
+                    const { PROBE_WIDTH: pw, PROBE_HEIGHT: ph } = REGION;
+                    const probe = document.createElement('canvas');
+                    probe.width = pw;
+                    probe.height = ph;
+                    const probeContext = probe.getContext('2d', { willReadFrequently: true });
+                    probeContext.drawImage(frame, bounds.x0, bounds.y0, bounds.x1 - bounds.x0, bounds.y1 - bounds.y0, 0, 0, pw, ph);
+                    const pixels = probeContext.getImageData(0, 0, pw, ph).data;
+                    let min = 255, max = 0;
+                    for (let i = 0; i < pixels.length; i += 4) {
+                        const gray = pixels[i] * .299 + pixels[i + 1] * .587 + pixels[i + 2] * .114;
+                        min = Math.min(min, gray);
+                        max = Math.max(max, gray);
+                    }
+                    probe.width = probe.height = 0;
+                    if (max - min < REGION.MIN_CONTRAST) {
+                        results[key] = { text: '', confidence: 0 };
+                        continue;
+                    }
+                    const crop = cropForOcr(frame, field.rect, REGION.TARGET_HEIGHT);
+                    if (!crop) {
+                        results[key] = { text: '', confidence: 0 };
+                        continue;
+                    }
+                    const whitelist = field.kind === 'price' ? '0123456789' : field.kind === 'percent' ? '0123456789.+-%' : '';
+                    try {
+                        await cancellable(worker.setParameters({
+                            tessedit_pageseg_mode: REGION.PAGE_SEG_MODE,
+                            preserve_interword_spaces: '1',
+                            tessedit_char_whitelist: whitelist
+                        }));
+                        if (disposed) throw new CancelledError();
+                        // Tesseract converts Canvas inputs asynchronously before posting the job.
+                        // Own that conversion so disposal cannot leave a late post to a dead worker.
+                        const image = await cancellable(new Promise((resolve, reject) => {
+                            crop.toBlob(blob => blob ? resolve(blob) : reject(new Error('识别区域图片转换失败')));
+                        }).then(blob => blob.arrayBuffer()));
+                        if (disposed) throw new CancelledError();
+                        const { data } = await cancellable(worker.recognize(new Uint8Array(image)));
+                        if (disposed) throw new CancelledError();
+                        results[key] = { text: data.text.trim(), confidence: data.confidence };
+                    } finally { crop.width = crop.height = 0; }
+                }
+                return results;
+            } finally { busy = false; }
+        }
+        async function dispose() {
+            if (disposed) return;
+            disposed = true;
+            cancelPending(new CancelledError());
+            const current = worker; worker = null;
+            if (current) await current.terminate().catch(() => {});
+            // A pending createWorker also observes disposed and terminates itself.
+            // Do not block closing on a model download. Its completion branch terminates a late worker.
+        }
+        return { prepare, recognizeRegions, dispose };
+    }
+    root.OcrRecognizer = { createSession, createRegionSession, CancelledError, ACCEPTED_TYPES };
 })(typeof self !== 'undefined' ? self : this);

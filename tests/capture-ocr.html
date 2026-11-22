@@ -1,0 +1,58 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Capture real OCR fixtures</title><base href="../docs/">
+<pre id="out">RUNNING</pre><script src="js/ocr/parse.js"></script><script src="js/ocr/merge.js"></script><script src="js/ocr/pair.js"></script><script src="js/ocr/recognizer.js"></script><script src="js/capture/model.js"></script><script src="js/capture/controller.js"></script>
+<script>
+(async()=>{
+ const log=[],out=document.getElementById('out'),ok=(v,m)=>{log.push((v?'ok   ':'FAIL ')+m);out.textContent=log.join('\n');};let session;
+ try{
+  session=OcrRecognizer.createRegionSession();await session.prepare();
+  async function fixture(name,scale=1,border=0){const img=new Image();img.src='../imgs/friend-price/'+name+'.png';await img.decode();const c=document.createElement('canvas');c.width=Math.round(img.width*scale)+border*2;c.height=Math.round(img.height*scale)+border*2;const ctx=c.getContext('2d');ctx.fillStyle='#333';ctx.fillRect(0,0,c.width,c.height);ctx.drawImage(img,border,border,c.width-border*2,c.height-border*2);const layout=GameCaptureModel.defaultLayout();layout.content={x:border/c.width,y:border/c.height,w:(c.width-border*2)/c.width,h:(c.height-border*2)/c.height};return {c,layout};}
+  for(const scale of [1,.7,1.3]){
+   const {c,layout}=await fixture('exp1',scale,scale===1?0:18);const read=await GameCapture.readFrame(session,c,layout,null);log.push('     detail '+scale+' '+JSON.stringify(read));
+   ok(read.page==='detail','reference detail classified at scale '+scale);
+   ok(read.name==='龙泡泡浮空艇货组'&&read.local===4346,'real detail name and local price 4346 at scale '+scale);c.width=c.height=0;
+   const f=await fixture('exp2',scale,scale===1?0:18);const friend=await GameCapture.readFrame(session,f.c,f.layout,{name:'龙泡泡浮空艇货组',local:4346});log.push('     friend '+scale+' '+JSON.stringify(friend));
+   ok(friend.page==='friend'&&friend.top,'friend page and scrollbar top at scale '+scale);
+   ok(friend.friendName==='绘梦逐空#3847','real first friend full name with suffix at scale '+scale);
+   ok(friend.price===4657&&friend.friendName!=='ARCK'&&friend.price!==4591,'real first price 4657 excludes self 0 and second 4591 at scale '+scale);
+   if(scale===1){const before=GameCapture.fingerprint(f.c,f.layout,'friend'),ctx=f.c.getContext('2d');ctx.fillStyle='magenta';ctx.fillRect(450,85,45,40);ctx.fillRect(450,235,45,45);ok(GameCaptureModel.grayDistance(before,GameCapture.fingerprint(f.c,f.layout,'friend'))===0,'animated self and first-friend avatars excluded from friend stability');ctx.fillStyle='white';ctx.fillRect(930,250,50,25);ok(GameCaptureModel.grayDistance(before,GameCapture.fingerprint(f.c,f.layout,'friend'))>5.1,'changed price detected even when page title remains unchanged');ctx.fillStyle='#eee';ctx.fillRect(1337,228,15,380);ctx.fillStyle='#555';ctx.fillRect(1340,355,5,22);ok(!GameCapture.isTop(f.c,f.layout),'real scrollbar moved down is not accepted as top');ctx.fillStyle='#eee';ctx.fillRect(430,210,930,470);const emptyList=await GameCapture.readFrame(session,f.c,f.layout,{name:'龙泡泡浮空艇货组',local:4346});log.push('     empty list '+JSON.stringify(emptyList));ok(emptyList.page==='friend'&&!emptyList.friendName&&emptyList.price===null,'real empty friend list cannot produce a valid quote');}
+   f.c.width=f.c.height=0;
+  }
+  const blank=document.createElement('canvas');blank.width=1367;blank.height=706;blank.getContext('2d').fillRect(0,0,blank.width,blank.height);
+  const empty=await GameCapture.readFrame(session,blank,GameCaptureModel.defaultLayout(),null);ok(empty.page==='unknown','empty/black frame produces no friend quote');
+  const cancellationFrame=await fixture('exp1');
+  // Hold Canvas encoding open so disposal always lands before the image is ready.
+  const toBlob=HTMLCanvasElement.prototype.toBlob;
+  let releaseEncoding,encodingStarted;
+  const encoding=new Promise(resolve=>{encodingStarted=resolve;});
+  try{
+   HTMLCanvasElement.prototype.toBlob=function(callback,...args){
+    toBlob.call(this,blob=>{
+     releaseEncoding=()=>callback(blob);
+     encodingStarted();
+    },...args);
+   };
+   const run=session.recognizeRegions(cancellationFrame.c,GameCapture.fields(cancellationFrame.layout,'detail',cancellationFrame.c)).then(()=>false,e=>e instanceof OcrRecognizer.CancelledError);
+   await encoding;await session.dispose();ok(await run,'disposing during Canvas encoding settles with cancellation before encoding finishes');
+   await releaseEncoding();
+   // Allow any detached Tesseract image conversion to finish and expose page errors.
+   await new Promise(r=>setTimeout(r,50));
+  }finally{HTMLCanvasElement.prototype.toBlob=toBlob;}
+  // Also cancel after the recognition job actually reaches the worker.
+  const running=OcrRecognizer.createRegionSession(),postMessage=Worker.prototype.postMessage;
+  let recognitionStarted;
+  const recognizing=new Promise(resolve=>{recognitionStarted=resolve;});
+  try{
+   await running.prepare();
+   Worker.prototype.postMessage=function(message,...args){
+    const result=postMessage.call(this,message,...args);
+    if(message.action==='recognize')recognitionStarted();
+    return result;
+   };
+   const run=running.recognizeRegions(cancellationFrame.c,GameCapture.fields(cancellationFrame.layout,'detail',cancellationFrame.c)).then(()=>false,e=>e instanceof OcrRecognizer.CancelledError);
+   await recognizing;await running.dispose();ok(await run,'terminating a running region recognition settles with cancellation');
+  }finally{Worker.prototype.postMessage=postMessage;await running.dispose();cancellationFrame.c.width=cancellationFrame.c.height=0;}
+  const cancel=OcrRecognizer.createRegionSession();await cancel.dispose();try{await cancel.prepare();ok(false,'disposed prepare');}catch(e){ok(e instanceof OcrRecognizer.CancelledError,'disposed region session rejects');}
+ }catch(e){log.push('ERROR '+(e.stack||e));}finally{if(session)await session.dispose();}
+ const failures=log.filter(s=>/^(FAIL|ERROR)/.test(s)).length;out.textContent=log.join('\n')+'\n'+(failures?'FAILED '+failures:'ALL PASSED '+log.length);
+})();
+</script></html>

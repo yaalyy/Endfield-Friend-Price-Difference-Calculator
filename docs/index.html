@@ -8,6 +8,7 @@
   <link rel="icon" href="./assets/logo.svg" type="image/svg+xml">
   <script src="https://unpkg.com/vue@3.5.45/dist/vue.global.js"></script>
   <link rel="stylesheet" href="./css/style.css">
+  <link rel="stylesheet" href="./css/capture.css">
 </head>
 <body>
 
@@ -85,9 +86,10 @@
                 <div class="section-title">好友报价 <button class="text-button" type="button" @click="openFriendDialog">＋ 新增好友</button></div>
                 <div class="friend-list">
                   <div v-for="(friend, index) in friends" :key="index" class="friend-row" :class="{ best: index === bestFriendIndex(activeProduct) }">
-                    <div><span class="friend-name">{{ friend.name }}</span><span v-if="index === bestFriendIndex(activeProduct)" class="tag">最优报价</span><span class="friend-price">报价 {{ money(calcPrice(activeProduct, friend.discounts[activeProduct.name])) }}</span></div>
-                    <label class="quote-input"><input type="number" step="any" v-model.number="friend.discounts[activeProduct.name]" :aria-label="friend.name + '的' + activeProduct.name + '折扣比'"><span>%</span></label>
-                    <span class="friend-diff" :class="getCellClass(calcPrice(activeProduct, friend.discounts[activeProduct.name]) - ownPrice(activeProduct))">单件差价 {{ money(calcPrice(activeProduct, friend.discounts[activeProduct.name]) - ownPrice(activeProduct)) }}</span>
+                    <div><span class="friend-name">{{ friend.source === 'game-capture' ? '游戏采集' : friend.name }}</span><span v-if="index === bestFriendIndex(activeProduct)" class="tag">最优报价</span><span class="friend-price">{{ friendPrice(activeProduct, friend) === null ? '未采集' : '报价 ' + money(friendPrice(activeProduct, friend)) }}</span><span v-if="captureQuote(friend, activeProduct)" class="quote-price">{{ captureQuote(friend, activeProduct).friendName }} · {{ timeLabel(captureQuote(friend, activeProduct).capturedAt) }} {{ captureQuote(friend, activeProduct).manuallyModified ? '· 已手动修改' : '' }}</span></div>
+                    <label v-if="friend.source !== 'game-capture'" class="quote-input"><input type="number" step="any" v-model.number="friend.discounts[activeProduct.name]" :aria-label="friend.name + '的' + activeProduct.name + '折扣比'"><span>%</span></label>
+                    <label v-else class="quote-input"><input type="number" min="1" step="1" :value="friendPrice(activeProduct,friend)" @change="editCaptureQuote(friend,activeProduct,'price',$event.target.value)" aria-label="采集整数售价"></label>
+                    <span class="friend-diff" :class="getCellClass(friendDifference(activeProduct,friend))">单件差价 {{ money(friendDifference(activeProduct,friend)) }}</span>
                   </div>
                   <div v-if="!friends.length" class="empty">暂无好友，新增好友后可录入报价。</div>
                 </div>
@@ -112,11 +114,18 @@
 
         <section v-show="currentView === 'friends'" aria-label="好友报价管理">
           <section class="management-panel">
-            <div class="management-toolbar"><div class="inventory-summary">共 <strong>{{ friends.length }}</strong> 位好友 · {{ products.length }} 件商品</div><button class="primary-button" style="margin-left: auto" type="button" @click="openFriendDialog">＋ 新增好友</button></div>
-            <div class="table-wrap"><table class="friend-table"><thead><tr><th>好友名称</th><th v-for="(product, index) in products" :key="index">{{ product.name }} · 折扣比</th><th class="number">操作</th></tr></thead><tbody>
+            <div class="management-toolbar"><div class="inventory-summary">共 <strong>{{ friends.length }}</strong> 位好友 · {{ products.length }} 件商品</div><div class="toolbar-actions"><button class="secondary-button" type="button" @click="openCaptureDialog">游戏采集（实验）</button><button class="primary-button" type="button" @click="openFriendDialog">＋ 新增好友</button></div></div>
+            <div class="table-wrap"><table class="friend-table"><thead><tr><th>好友名称</th><th v-for="(product, index) in products" :key="index">{{ product.name }} · 报价</th><th class="number">操作</th></tr></thead><tbody>
               <tr v-for="(friend, fIndex) in friends" :key="fIndex">
-                <td><input class="inline-input" v-model="friend.name" :aria-label="'好友 ' + (fIndex + 1) + ' 名称'"></td>
-                <td v-for="(product, index) in products" :key="index"><label class="quote-input"><input type="number" step="any" v-model.number="friend.discounts[product.name]" :aria-label="friend.name + '的' + product.name + '折扣比'"><span>%</span></label><span class="quote-price">报价 {{ money(calcPrice(product, friend.discounts[product.name])) }}</span><span class="quote-diff" :class="getCellClass(calcPrice(product, friend.discounts[product.name]) - ownPrice(product))">单件差价 {{ money(calcPrice(product, friend.discounts[product.name]) - ownPrice(product)) }}</span></td>
+                <td><template v-if="friend.source === 'game-capture'"><strong>游戏采集</strong><span class="tag capture-source">窗口采集</span></template><input v-else class="inline-input" v-model="friend.name" :aria-label="'好友 ' + (fIndex + 1) + ' 名称'"></td>
+                <td v-for="(product, index) in products" :key="index">
+                  <template v-if="friend.source === 'game-capture'">
+                    <label class="quote-input"><input type="number" min="1" step="1" :value="friendPrice(product,friend)" placeholder="未采集" :aria-label="product.name + '采集售价'" @change="editCaptureQuote(friend,product,'price',$event.target.value)"><span>售价</span></label>
+                    <template v-if="captureQuote(friend,product)"><input class="inline-input" :value="captureQuote(friend,product).friendName" aria-label="实际好友备注" @change="editCaptureQuote(friend,product,'friendName',$event.target.value)"><span class="quote-price">{{ timeLabel(captureQuote(friend,product).capturedAt) }}</span><span v-if="captureQuote(friend,product).manuallyModified" class="tag">已手动修改</span><button type="button" class="text-button danger-text" @click="clearCaptureQuote(friend,product)">清除此报价</button></template>
+                  </template>
+                  <label v-else class="quote-input"><input type="number" step="any" v-model.number="friend.discounts[product.name]" :aria-label="friend.name + '的' + product.name + '折扣比'"><span>%</span></label>
+                  <span class="quote-price">{{ friendPrice(product,friend) === null ? '未采集' : '报价 ' + money(friendPrice(product,friend)) }}</span><span class="quote-diff" :class="getCellClass(friendDifference(product,friend))">单件差价 {{ money(friendDifference(product,friend)) }}</span>
+                </td>
                 <td class="number"><button class="text-button danger-text" type="button" @click="removeFriend(fIndex)">删除好友</button></td>
               </tr>
               <tr v-if="!friends.length"><td :colspan="products.length + 2" class="empty">暂无好友，新增后可为所有商品录入报价。</td></tr>
@@ -126,6 +135,53 @@
         </section>
         <footer class="site-footer"><p>本项目为玩家制作的免费辅助工具，与《明日方舟：终末地》官方无关联。</p></footer>
       </main>
+    </div>
+
+    <div v-if="dialog === 'capture'" class="modal-backdrop" @keydown.esc.stop="closeDialog" @keydown.tab="trapDialogFocus">
+      <section class="add-dialog capture-dialog" role="dialog" aria-modal="true" aria-labelledby="captureTitle" ref="dialogPanel" tabindex="-1">
+        <header class="dialog-header"><div><h2 id="captureTitle">游戏采集（实验）</h2><p class="dialog-subtitle">共享游戏窗口后，由你切换商品详情和好友价格页。只读取首位好友，核对确认后保存。</p></div><button class="icon-button" type="button" @click="closeDialog" aria-label="关闭采集">×</button></header>
+        <div class="capture-body">
+          <p class="form-hint">Windows Edge / Chrome。详情页显示「等待好友价格」后即可切页；好友页显示「该商品已采集」或「报价待核对」后即可继续。加载中的列表需要等报价出现。该功能正在实验中。</p>
+          <div class="capture-controls">
+            <button ref="dialogName" class="secondary-button" type="button" :disabled="capture.loading || capture.running || capture.ready || capture.stopping" @click="prepareCapture">{{ capture.loading ? '模型加载中…' : capture.ready ? '模型已就绪' : '预热 / 重试模型' }}</button>
+            <button class="primary-button" type="button" :disabled="(!capture.ready && !capture.diagnosticsOnly) || capture.running || capture.stopping" @click="startCapture">开始采集 / 选择窗口</button>
+            <button class="secondary-button" type="button" :disabled="!capture.running || capture.calibrating || capture.stopping" @click="toggleCapture">{{ capture.paused ? '继续' : '暂停' }}</button>
+            <button class="secondary-button" type="button" :disabled="!capture.running || capture.calibrating || capture.stopping" @click="beginCalibration">调整识别区域</button>
+            <button class="secondary-button" type="button" :disabled="!capture.running || capture.stopping" @click="stopCapture">停止并核对</button>
+            <label><input type="checkbox" v-model="capture.diagnosticsOnly" :disabled="capture.running">仅诊断帧输入（不识别）</label>
+          </div>
+          <p v-if="capture.error" class="dialog-error" role="alert">{{ capture.error }}</p>
+          <p class="capture-status" role="status">{{ capture.status }} <span>· 已采集 {{ captureCount }} 件 · 待核对 {{ capturePending }} 项</span></p>
+          <div class="capture-workspace">
+            <div class="capture-video" ref="captureVideo" v-show="!capture.calibrating"><span v-if="!capture.running">共享开始后显示窗口预览</span></div>
+            <div class="capture-timing"><p>最近有效帧：{{ timeLabel(capture.diagnostic.lastValidFrame) }}</p><p>最近识别结果：{{ timeLabel(capture.diagnostic.lastRecognition) }}</p><p>当前商品：{{ capture.diagnostic.currentProduct || '等待商品详情确认' }}</p><p>模型预热：{{ capture.diagnostic.modelMs == null ? '—' : (capture.diagnostic.modelMs / 1000).toFixed(1) + ' 秒' }}</p></div>
+          </div>
+          <section v-if="capture.calibrating" class="calibration" aria-label="区域校准">
+            <div class="capture-controls"><label>页面 <select v-model="capture.page" @change="capture.field = 'name'; updateCalibrationPreview()"><option value="detail">商品详情</option><option value="friend">好友价格</option></select></label><label>区域 <select v-model="capture.field" @change="updateCalibrationPreview"><option value="content">有效内容范围（排除边框）</option><option v-for="key in calibrationFields" :key="key" :value="key">{{ captureRegionLabel(key) }}</option></select></label><label><input type="checkbox" v-model="captureLayout.noScroll" aria-describedby="captureNoScrollbarHint">好友列表右侧没有滚动条</label></div>
+            <p id="captureNoScrollbarHint" class="form-hint">仅当所有好友一屏显示完、列表右侧确实没有滚动条时勾选。有滚动条但没有滚动时，请勿勾选。勾选后，每次采集须先在商品详情页停留，再打开好友价格页。</p>
+            <p class="form-hint">冻结画面上拖动区域，右下角方块缩放。名称与售价只框第一位实际好友，避开置顶本人及货币图标；顶部标记须覆盖完整滚动条。两页配置可分别冻结保存。</p>
+            <div class="calibration-image" ref="calibrationImage"><img :src="capture.snapshot" alt="冻结的校准画面" draggable="false"><div class="calibration-region" :style="calibrationStyle(calibrationRect)" @pointerdown="beginRegionDrag($event,capture.field)" @pointermove="moveRegionDrag" @pointerup="endRegionDrag" @pointercancel="endRegionDrag"><span>{{ captureRegionLabel(capture.field) }}</span><b @pointerdown.stop="beginRegionDrag($event,capture.field,true)" @pointermove="moveRegionDrag" @pointerup="endRegionDrag" @pointercancel="endRegionDrag"></b></div></div>
+            <div class="capture-controls"><label v-for="k in ['x','y','w','h']" :key="k">{{ k }} <input class="region-number" type="number" min="0" max="1" step="0.001" v-model.number="calibrationRect[k]" @change="updateCalibrationPreview"></label><button class="primary-button" type="button" @click="saveCalibration">保存区域并继续</button></div>
+            <img class="calibration-preview" :src="capture.preview" alt="当前区域裁剪预览">
+          </section>
+          <details class="capture-diagnostics"><summary>诊断信息（实际采样与后台状态）</summary><label>浏览器版本（试验记录填写）<input class="inline-input" v-model="capture.browserVersion" placeholder="例如 Edge 版本号"></label><p>画面 {{ capture.diagnostic.width || 0 }} × {{ capture.diagnostic.height || 0 }} · 页面{{ capture.diagnostic.hidden ? '后台' : '前台' }} · 轨道 {{ capture.diagnostic.track || '未共享' }}</p><p>采样 {{ capture.diagnostic.samples || 0 }} · 视频帧 {{ capture.diagnostic.frames || 0 }} · 最近采样间隔 {{ Math.round(capture.diagnostic.lastIntervalMs || 0) }} ms · 最长采样间断 {{ Math.round(capture.diagnostic.longestGapMs || 0) }} ms · 实际平均 {{ (capture.diagnostic.actualSamplesPerSecond || 0).toFixed(2) }} 次/秒</p><p>最近视频帧间隔 {{ Math.round(capture.diagnostic.lastFrameIntervalMs || 0) }} ms · 最长视频断帧 {{ Math.round(capture.diagnostic.longestFrameGapMs || 0) }} ms · 首个有效帧 {{ timeLabel(capture.diagnostic.firstValidFrame) }}</p><button class="secondary-button" type="button" @click="exportCaptureDiagnostic">导出 JSON 诊断（不含图像）</button><pre>{{ JSON.stringify(capture.diagnostic.events.slice(-12), null, 2) }}</pre></details>
+          <h3>结果核对</h3><p class="form-hint">停止后可编辑并勾选导入；异常默认排除。冲突候选须只选一个，不会自动选择更高价。保存不会修改已有本地价格。</p>
+          <div class="table-wrap capture-review"><table><thead><tr><th>导入</th><th>所属商品</th><th>实际好友名称</th><th>整数售价</th><th>本地价<br>游戏 / 计算器</th><th>单件差价</th><th>原采集价 / 变化</th><th>采集时间 / 状态</th><th>文字裁剪</th></tr></thead><tbody>
+            <tr v-for="row in capture.rows" :key="row.id" :class="{'row-error':captureErrors[row.id]}">
+              <td><input type="checkbox" v-model="row.checked" :disabled="capture.running || capture.stopping" :aria-label="'导入采集 ' + (row.productName || '待选择商品')"></td>
+              <td><select v-model="row.productName" :disabled="capture.running" @change="editCaptureRow(row)"><option value="">待选择商品</option><option v-for="p in products" :key="p.name" :value="p.name">{{ p.name }}</option></select><small v-if="row.detectedName">识别：{{ row.detectedName }}</small><small v-if="!row.productName">近似：{{ captureSuggestions(row).join('、') || '无' }}</small><span class="import-error">{{ captureErrors[row.id] }}</span></td>
+              <td><input class="inline-input" v-model="row.friendName" :disabled="capture.running" aria-label="核对实际好友名称" @input="editCaptureRow(row)"></td>
+              <td><input class="inline-input capture-price" type="number" min="1" step="1" v-model.number="row.price" :disabled="capture.running" aria-label="核对整数售价" @input="editCaptureRow(row)"></td>
+              <td>{{ row.observedLocalPrice || '—' }} / {{ money(captureLocal(row)) }}</td>
+              <td>{{ captureLocal(row) !== null && row.price ? money(row.price - captureLocal(row)) : '—' }}</td>
+              <td>{{ captureOld(row) ?? '—' }} / {{ captureOld(row) !== null && row.price ? money(row.price - captureOld(row)) : '—' }}</td>
+              <td><small>{{ timeLabel(row.capturedAt) }}</small><span :class="row.reasons.length ? 'import-error' : 'capture-ok'">{{ captureWarnings(row) }}</span><small v-if="row.edited">已手动修改</small></td>
+              <td><img v-if="row.detailImage" class="capture-crop" :src="row.detailImage" alt="商品详情文字裁剪"><img v-if="row.image" class="capture-crop" :src="row.image" alt="首位好友文字裁剪"></td>
+            </tr><tr v-if="!capture.rows.length"><td colspan="9" class="empty">暂无采集结果。打开商品详情，停留后再打开好友价格页。</td></tr>
+          </tbody></table></div>
+        </div>
+        <footer class="dialog-footer"><span class="dialog-footer-note">{{ capture.rows.filter(r=>r.checked).length }} 项待导入 · 关闭后丢弃未保存结果及截图</span><div class="dialog-actions"><button class="secondary-button" type="button" @click="closeDialog">关闭</button><button class="primary-button" type="button" :disabled="!canImportCapture" @click="confirmCapture">核对并保存报价</button></div></footer>
+      </section>
     </div>
 
     <div v-if="dialog === 'import'" class="modal-backdrop" @click.self="closeDialog" @keydown.esc.stop="closeDialog" @keydown.tab="trapDialogFocus">
@@ -171,7 +227,7 @@
       </section>
     </div>
 
-    <div v-if="dialog && dialog !== 'import'" class="modal-backdrop" @click.self="closeDialog" @keydown.esc.stop="closeDialog" @keydown.tab="trapDialogFocus">
+    <div v-if="dialog && dialog !== 'import' && dialog !== 'capture'" class="modal-backdrop" @click.self="closeDialog" @keydown.esc.stop="closeDialog" @keydown.tab="trapDialogFocus">
       <section class="add-dialog" :class="{ 'friend-dialog': dialog === 'friend' }" role="dialog" aria-modal="true" aria-labelledby="dialogTitle" aria-describedby="dialogHint" tabindex="-1" ref="dialogPanel">
         <form @submit.prevent="dialog === 'product' ? submitProduct() : submitFriend()">
           <header class="dialog-header"><div><h2 id="dialogTitle">{{ dialog === 'friend' ? '新增好友' : editingProductIndex === null ? '添加商品' : '编辑商品' }}</h2><p class="dialog-subtitle" id="dialogHint">{{ dialog === 'friend' ? '填写好友名称与各商品的报价折扣比。' : '填写商品信息，好友报价和收益将实时计算。' }}</p></div><button class="icon-button" type="button" aria-label="关闭窗口" @click="closeDialog">×</button></header>
@@ -198,6 +254,9 @@
   <script src="./js/ocr/merge.js"></script>
   <script src="./js/ocr/pair.js"></script>
   <script src="./js/ocr/recognizer.js"></script>
+  <script src="./js/capture/model.js?v=20261122.4"></script>
+  <script src="./js/capture/controller.js?v=20261122.4"></script>
+  <script src="./js/capture/vue.js?v=20261122.4"></script>
   <script src="./js/app.js"></script>
 </body>
 </html>
