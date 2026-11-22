@@ -83,7 +83,7 @@ playwright install chromium
 ### 自动化测试
 
 ```
-# 默认运行 unit、app、ui 三个测试页
+# 默认运行 unit、app、ui、capture 四个测试页
 python tests/run.py
 
 # 只运行指定测试页，可一次指定多个
@@ -94,10 +94,10 @@ python tests/run.py app ui
 python tests/run.py e2e
 
 # 完整测试
-python tests/run.py unit app ui e2e
+python tests/run.py unit app ui e2e capture capture-ocr --browser msedge
 
 # 使用本机已安装的 Edge，无需安装 Playwright Chromium
-python --browser msedge
+python tests/run.py --browser msedge
 
 # 显示浏览器窗口以便调试
 python tests/run.py app --browser msedge --headed
@@ -113,6 +113,8 @@ python tests/run.py --browser msedge --coverage
 | `app` | 实际 Vue 页面中的价格与收益、商品和好友增删改、名称迁移、本地存储 |
 | `ui` | 模拟识别结果下的导入交互、编辑、校验、取消与确认流程 |
 | `e2e` | Canvas 合成图片上的真实 OCR、取消后重试、字段输出与跨卡片串价检查 |
+| `capture` | 独立状态机、可控 OCR、模拟视频帧和 MediaStream、资源与取消、真实 Vue 核对及正式导入 |
+| `capture-ocr` | 用户提供的 `imgs/friend-price/exp1.png`、`exp2.png`，0.7/1/1.3 倍缩放、边框裁剪，真实区域 OCR 的关键失败断言 |
 
 测试退出码：`0` 表示通过，`1` 表示失败、页面错误或超时，`2` 表示未知测试页、缺少 Playwright 或浏览器启动失败。未捕获异常和大部分控制台错误也会导致失败。
 
