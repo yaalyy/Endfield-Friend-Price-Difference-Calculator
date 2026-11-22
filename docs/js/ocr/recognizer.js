@@ -500,7 +500,13 @@
                             tessedit_char_whitelist: whitelist
                         }));
                         if (disposed) throw new CancelledError();
-                        const { data } = await cancellable(worker.recognize(crop));
+                        // Tesseract converts Canvas inputs asynchronously before posting the job.
+                        // Own that conversion so disposal cannot leave a late post to a dead worker.
+                        const image = await cancellable(new Promise((resolve, reject) => {
+                            crop.toBlob(blob => blob ? resolve(blob) : reject(new Error('识别区域图片转换失败')));
+                        }).then(blob => blob.arrayBuffer()));
+                        if (disposed) throw new CancelledError();
+                        const { data } = await cancellable(worker.recognize(new Uint8Array(image)));
                         if (disposed) throw new CancelledError();
                         results[key] = { text: data.text.trim(), confidence: data.confidence };
                     } finally { crop.width = crop.height = 0; }

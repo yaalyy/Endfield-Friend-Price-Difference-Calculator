@@ -20,8 +20,37 @@
   const blank=document.createElement('canvas');blank.width=1367;blank.height=706;blank.getContext('2d').fillRect(0,0,blank.width,blank.height);
   const empty=await GameCapture.readFrame(session,blank,GameCaptureModel.defaultLayout(),null);ok(empty.page==='unknown','empty/black frame produces no friend quote');
   const cancellationFrame=await fixture('exp1');
-  const run=session.recognizeRegions(cancellationFrame.c,GameCapture.fields(cancellationFrame.layout,'detail',cancellationFrame.c)).then(()=>false,e=>e instanceof OcrRecognizer.CancelledError);
-  await new Promise(r=>setTimeout(r,1));await session.dispose();ok(await run,'terminating a running region recognition settles with cancellation');
+  // Hold Canvas encoding open so disposal always lands before the image is ready.
+  const toBlob=HTMLCanvasElement.prototype.toBlob;
+  let releaseEncoding,encodingStarted;
+  const encoding=new Promise(resolve=>{encodingStarted=resolve;});
+  try{
+   HTMLCanvasElement.prototype.toBlob=function(callback,...args){
+    toBlob.call(this,blob=>{
+     releaseEncoding=()=>callback(blob);
+     encodingStarted();
+    },...args);
+   };
+   const run=session.recognizeRegions(cancellationFrame.c,GameCapture.fields(cancellationFrame.layout,'detail',cancellationFrame.c)).then(()=>false,e=>e instanceof OcrRecognizer.CancelledError);
+   await encoding;await session.dispose();ok(await run,'disposing during Canvas encoding settles with cancellation before encoding finishes');
+   await releaseEncoding();
+   // Allow any detached Tesseract image conversion to finish and expose page errors.
+   await new Promise(r=>setTimeout(r,50));
+  }finally{HTMLCanvasElement.prototype.toBlob=toBlob;}
+  // Also cancel after the recognition job actually reaches the worker.
+  const running=OcrRecognizer.createRegionSession(),postMessage=Worker.prototype.postMessage;
+  let recognitionStarted;
+  const recognizing=new Promise(resolve=>{recognitionStarted=resolve;});
+  try{
+   await running.prepare();
+   Worker.prototype.postMessage=function(message,...args){
+    const result=postMessage.call(this,message,...args);
+    if(message.action==='recognize')recognitionStarted();
+    return result;
+   };
+   const run=running.recognizeRegions(cancellationFrame.c,GameCapture.fields(cancellationFrame.layout,'detail',cancellationFrame.c)).then(()=>false,e=>e instanceof OcrRecognizer.CancelledError);
+   await recognizing;await running.dispose();ok(await run,'terminating a running region recognition settles with cancellation');
+  }finally{Worker.prototype.postMessage=postMessage;await running.dispose();cancellationFrame.c.width=cancellationFrame.c.height=0;}
   const cancel=OcrRecognizer.createRegionSession();await cancel.dispose();try{await cancel.prepare();ok(false,'disposed prepare');}catch(e){ok(e instanceof OcrRecognizer.CancelledError,'disposed region session rejects');}
  }catch(e){log.push('ERROR '+(e.stack||e));}finally{if(session)await session.dispose();}
  const failures=log.filter(s=>/^(FAIL|ERROR)/.test(s)).length;out.textContent=log.join('\n')+'\n'+(failures?'FAILED '+failures:'ALL PASSED '+log.length);
