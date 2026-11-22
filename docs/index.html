@@ -141,7 +141,7 @@
       <section class="add-dialog capture-dialog" role="dialog" aria-modal="true" aria-labelledby="captureTitle" ref="dialogPanel" tabindex="-1">
         <header class="dialog-header"><div><h2 id="captureTitle">游戏采集（实验）</h2><p class="dialog-subtitle">共享游戏窗口后，由你切换商品详情和好友价格页。只读取首位好友，核对确认后保存。</p></div><button class="icon-button" type="button" @click="closeDialog" aria-label="关闭采集">×</button></header>
         <div class="capture-body">
-          <p class="form-hint">Windows Edge / Chrome · HTTPS 或 localhost。先在详情页停留，再打开好友价格并停留；每页建议至少 3 秒。该功能正在实验中。</p>
+          <p class="form-hint">Windows Edge / Chrome。详情页显示「等待好友价格」后即可切页；好友页显示「该商品已采集」或「报价待核对」后即可继续。加载中的列表需要等报价出现。该功能正在实验中。</p>
           <div class="capture-controls">
             <button ref="dialogName" class="secondary-button" type="button" :disabled="capture.loading || capture.running || capture.ready || capture.stopping" @click="prepareCapture">{{ capture.loading ? '模型加载中…' : capture.ready ? '模型已就绪' : '预热 / 重试模型' }}</button>
             <button class="primary-button" type="button" :disabled="(!capture.ready && !capture.diagnosticsOnly) || capture.running || capture.stopping" @click="startCapture">开始采集 / 选择窗口</button>
@@ -254,9 +254,9 @@
   <script src="./js/ocr/merge.js"></script>
   <script src="./js/ocr/pair.js"></script>
   <script src="./js/ocr/recognizer.js"></script>
-  <script src="./js/capture/model.js"></script>
-  <script src="./js/capture/controller.js"></script>
-  <script src="./js/capture/vue.js"></script>
+  <script src="./js/capture/model.js?v=20261122.4"></script>
+  <script src="./js/capture/controller.js?v=20261122.4"></script>
+  <script src="./js/capture/vue.js?v=20261122.4"></script>
   <script src="./js/app.js"></script>
 </body>
 </html>

@@ -1,5 +1,6 @@
 (function (root) {
     'use strict';
+    const VERSION = '20261122.4';
     const M = root.GameCaptureModel;
     const TILE = M.TUNING.TILE_SIZE;
 
@@ -8,7 +9,7 @@
         // Fingerprint tiles per region, laid out horizontally.
         FINGERPRINT_TILES: 4,
         // Minimum time between two processed samples.
-        SAMPLE_INTERVAL_MS: 500,
+        SAMPLE_INTERVAL_MS: 125,
         // Polling interval when requestVideoFrameCallback is unavailable.
         FALLBACK_POLL_MS: 100,
         // A sample or frame gap longer than this clears the product association.
@@ -123,14 +124,22 @@
     async function readFrame(ocr, frame, layout, context) {
         const friendFields = fields(layout, 'friend', frame);
         const markers = await ocr.recognizeRegions(frame, {
-            friendTitle: friendFields.title,
-            detailTitle: fields(layout, 'detail', frame).title
+            friendTitle: friendFields.title
         });
-        const friendTitle = markers.friendTitle.text.replace(/\s/g, '');
-        const detailTitle = markers.detailTitle.text.replace(/\s/g, '');
-        const page = friendTitle.includes('好友价格') ? 'friend'
-            : detailTitle.includes('购买物资') || detailTitle.includes('出售物资') ? 'detail'
-            : 'unknown';
+        const classify = text => {
+            const title = text.replace(/\s/g, '');
+            return title.includes('好友价格') ? 'friend'
+                : title.includes('购买物资') || title.includes('出售物资') ? 'detail' : 'unknown';
+        };
+        let page = classify(markers.friendTitle.text);
+        // The two calibrated title regions usually overlap. Read the second only when
+        // the first cannot identify either page; each OCR attempt still reads its own title.
+        if (page === 'unknown') {
+            Object.assign(markers, await ocr.recognizeRegions(frame, {
+                detailTitle: fields(layout, 'detail', frame).title
+            }));
+            page = classify(markers.detailTitle.text);
+        }
         if (page === 'unknown') return { page, raw: markers };
         const regions = page === 'friend' ? friendFields : fields(layout, page, frame);
         delete regions.title;
@@ -168,6 +177,7 @@
         let runStarted = 0, runSamples = 0, stopping = null;
         let fingerprintPage = null, lastTitles = null, titleAnchor = null;
         const diagnostics = {
+            codeVersions: { controller: VERSION, model: M.VERSION || 'unversioned' },
             events: [], samplingWindows: [], samples: 0, frames: 0,
             longestGapMs: 0, lastIntervalMs: 0, lastFrameIntervalMs: 0, longestFrameGapMs: 0,
             firstValidFrame: null, lastValidFrame: null, lastRecognition: null, modelMs: null,
@@ -188,6 +198,7 @@
             products: options.products || (() => []),
             onState: s => {
                 diagnostics.currentProduct = engine?.context?.name || '';
+                emit('state', { state: s, currentProduct: diagnostics.currentProduct });
                 onState(s);
             },
             onCandidate
@@ -239,6 +250,7 @@
             return preparing;
         }
         function supportError() {
+            if (M.VERSION !== VERSION) return '采集组件版本不一致，请刷新页面后重试（商品识别脚本仍是旧版本）';
             if (!root.isSecureContext) return '窗口采集需要 HTTPS 或 localhost 安全上下文';
             if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) return '此浏览器不支持窗口共享，请使用 Windows Edge / Chrome';
             return '';
@@ -331,7 +343,7 @@
                 return;
             }
             recordSample(f, now, gap);
-            if (engine.observe(gray) && !options.diagnosticsOnly) {
+            if (engine.observe(gray, now) && !options.diagnosticsOnly) {
                 clearPending();
                 pending = { frame: f, engineVersion: engine.version, version, sequence: engine.sequence };
                 drain();
@@ -358,7 +370,6 @@
                 const read = await (options.readFrame || readFrame)(ocr, task.frame, layout, task.token.context);
                 if (task.version !== version || !active || paused || disposed || task.token.version !== engine.version) return;
                 diagnostics.lastRecognition = new Date().toISOString();
-                emit('recognition', { durationMs: performance.now() - began, page: read.page, raw: read.raw || {} });
                 const known = read.page === 'friend' || read.page === 'detail';
                 if (known && fingerprintPage !== read.page) {
                     // Once classified, recheck stability against this page's text only. Never compare
@@ -368,7 +379,12 @@
                     engine.stable = 1;
                     clearPending();
                 }
-                engine.accept(read, task.token, known ? thumbnails(task.frame, layout, read.page) : '');
+                const accepted = engine.accept(read, task.token, known ? thumbnails(task.frame, layout, read.page) : '');
+                emit('recognition', {
+                    durationMs: performance.now() - began, page: read.page, raw: read.raw || {}, accepted,
+                    productBefore: task.token.context?.name || '', productAfter: engine.context?.name || '',
+                    detectedName: engine.detectedName
+                });
             } catch (e) {
                 if (task.version === version && active) {
                     invalidate('窗口无法读取 / 识别失败：' + e.message);
@@ -549,5 +565,5 @@
             get queueSize() { return pending ? 1 : 0; }
         };
     }
-    root.GameCapture = { CAPTURE, createSession, readFrame, fingerprint, isTop, fields, thumbnails };
+    root.GameCapture = { VERSION, CAPTURE, createSession, readFrame, fingerprint, isTop, fields, thumbnails };
 })(typeof self !== 'undefined' ? self : this);

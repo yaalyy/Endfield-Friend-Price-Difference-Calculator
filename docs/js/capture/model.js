@@ -16,6 +16,10 @@
         ATTEMPT_SPACING: 2,
         // A repeated read confirms only when its sample is at least this far from the previous evidence.
         CONFIRM_SPACING: 2,
+        // Keep a confirmed detail through a short page animation, until the next page is read.
+        TRANSITION_GRACE_MS: 2000,
+        // The friend-page title can appear before its rows finish loading.
+        FRIEND_LOAD_GRACE_MS: 10000,
         // Allowed gap, in percentage points, between the computed and the displayed "对比本地" percent.
         PERCENT_TOLERANCE: 0.2,
         // Allowed gap between the in-game local price and the calculator's own price.
@@ -196,20 +200,41 @@
             this.rounds = 0;
             this.evidence = null;
             this.done = false;
+            this.transitionStartedAt = null;
+            this.friendLoadingSince = null;
+            this.observedAt = null;
             this.lastAttempt = -Infinity;
             this.onState(reason);
         }
-        observe(gray) {
+        observe(gray, now = performance.now()) {
             this.sequence++;
+            this.observedAt = now;
+            if (this.friendLoadingSince !== null && now - this.friendLoadingSince > TUNING.FRIEND_LOAD_GRACE_MS) {
+                this.version++;
+                this.context = null;
+                this.detectedName = '';
+                this.friendLoadingSince = null;
+                this.transitionStartedAt = null;
+                this.evidence = null;
+                this.rounds = 0;
+                this.done = false;
+                this.onState('好友列表加载超时，请重新打开商品详情');
+            }
             // Each text region must be stable; a small price change must not be diluted by other fields.
             const near = grayDistance(gray, this.previous) <= TUNING.STABLE_DISTANCE &&
                 grayDistance(gray, this.anchor) <= TUNING.STABLE_DISTANCE;
             if (!near) {
                 // Invalidate every in-flight read immediately, before knowing the new page.
                 this.version++;
-                if (this.page !== 'detail' || !this.done) {
+                const leavingDetail = this.page === 'detail' && this.done;
+                const inTransition = this.page === null && this.transitionStartedAt !== null &&
+                    now - this.transitionStartedAt <= TUNING.TRANSITION_GRACE_MS;
+                const loadingFriends = this.friendLoadingSince !== null;
+                if (leavingDetail) this.transitionStartedAt = now;
+                else if (!inTransition && !loadingFriends) {
                     this.context = null;
                     this.detectedName = '';
+                    this.transitionStartedAt = null;
                 }
                 this.page = null;
                 this.anchor = gray;
@@ -235,6 +260,23 @@
                 return false;
             }
             this.page = read.page;
+            this.transitionStartedAt = null;
+            if (read.page === 'friend' && !read.friendName && !validPrice(read.price)) {
+                // An empty list is not quote evidence. Retry it without consuming the detail
+                // association; later row pixels changing are loading, not another product.
+                if (this.friendLoadingSince === null) this.friendLoadingSince = this.observedAt ?? performance.now();
+                this.evidence = null;
+                this.rounds = 0;
+                this.done = false;
+                this.onState('好友列表为空或加载中，等待首位好友报价');
+                return false;
+            }
+            this.friendLoadingSince = null;
+            // Seeing another detail already ends the previous association, even before confirmation.
+            if (read.page === 'detail') {
+                this.context = null;
+                this.detectedName = read.name || '';
+            }
             const key = JSON.stringify([read.page, read.name, read.local, read.friendName, read.price, read.percent, read.top]);
             const repeated = this.evidence && this.evidence.key === key &&
                 token.sequence - this.evidence.sequence >= TUNING.CONFIRM_SPACING;
@@ -289,6 +331,7 @@
         }
     }
     root.GameCaptureModel = {
+        VERSION: '20261122.4',
         TUNING, defaultLayout, validLayout, validRect, absoluteRect, validPrice, parsePrice, friendName, parsePercent,
         friendPrice, rowErrors, importRows, normalizeFriends, addCandidate, grayDistance, Engine
     };

@@ -2,6 +2,9 @@
     const log=[],ok=(v,m)=>{log.push((v?'ok   ':'FAIL ')+m);document.getElementById('out').textContent=log.join('\n');},M=GameCaptureModel;
     const wait=ms=>new Promise(r=>setTimeout(r,ms));
     try{
+        {const version=M.VERSION;
+            try{M.VERSION='old';const stale=GameCapture.createSession();ok(stale.supportError().includes('版本不一致'),'mixed cached capture components are rejected with a clear reload message');await stale.dispose();}
+            finally{M.VERSION=version;}}
         ok(M.friendName(' 绘梦逐空＃3847\n')==='绘梦逐空#3847','friend suffix and valid punctuation preserved');
         for(const v of ['','0','-1','4O57','4657.2','4657 4591'])ok(M.parsePrice(v)===null,'reject ambiguous/zero price '+v);
         ok(M.parsePrice('４６５７')===4657,'integer parsing');
@@ -38,7 +41,34 @@
         engine.reset();shade=10;confirm(detail('商品A'));shade=50;for(let i=0;i<3;i++)engine.observe([shade,shade,shade]);const token=engine.begin();engine.observe([200,200,200]);const count=results.length;
         ok(!engine.accept(friend(),token)&&results.length===count,'late OCR after page change discarded');
         engine.reset();ok(!engine.accept(friend(),token),'old session/context token discarded');
-        engine.reset();shade=10;confirm(detail('商品A'));shade=50;engine.observe([shade,shade,shade]);shade=90;confirm(friend());ok(!results.at(-1).checked,'two transitions before detail reconfirmation cannot reuse old product');
+        engine.reset();shade=10;confirm(detail('商品A'));shade=50;engine.observe([shade,shade,shade]);shade=90;confirm(friend());ok(results.at(-1).productName==='商品A'&&results.at(-1).checked,'short multi-frame page animation preserves the confirmed product');
+        engine.reset();shade=10;confirm(detail('商品A'));shade=50;engine.observe([shade,shade,shade]);confirm({page:'unknown'});shade=90;confirm(friend());ok(!results.at(-1).checked,'stable unknown page clears the product before a later friend page');
+        engine.reset();shade=10;confirm(detail('商品A'));shade=50;for(let i=0;i<3;i++)engine.observe([shade,shade,shade]);engine.accept(detail('商品B'),engine.begin());shade=90;confirm(friend());ok(!results.at(-1).checked,'one unconfirmed read of a different detail cannot retain the old product');
+        {const seen=[],timed=new M.Engine({products:()=>products,onCandidate:r=>seen.push(r)});
+            const feed=(read,gray,now)=>{for(let i=0;i<5;i++)if(timed.observe([gray,gray,gray],now+i*250))timed.accept(read,timed.begin());};
+            feed(detail('商品A'),10,0);timed.observe([50,50,50],1500);feed(friend(),90,4000);
+            ok(seen.length===1&&!seen[0].checked,'prolonged transition cannot reuse the old product');}
+        {const seen=[],loading=new M.Engine({products:()=>[{name:'武陵冻梨货组',basePrice:3146,discount:0}],onCandidate:r=>seen.push(r)});
+            const feed=(read,gray,now)=>{for(let i=0;i<5;i++)if(loading.observe([gray,gray,gray],now+i*260))loading.accept(read,loading.begin());};
+            feed({page:'detail',name:'武陵冻梨货组',local:3146},10,0);
+            feed({page:'friend',friendName:'',price:null,percent:null,top:false},50,1500);
+            ok(seen.length===0,'diagnostic replay: an empty loading list does not consume the product or create a quote');
+            feed({page:'friend',friendName:'故渊#7741',price:3552,percent:12.9,top:true},90,3000);
+            ok(seen.length===1&&seen[0].productName==='武陵冻梨货组'&&seen[0].observedLocalPrice===3146&&seen[0].checked,'diagnostic replay: loaded 3552 quote retains the recognized product and local price');
+            feed({page:'friend',friendName:'其他好友#1',price:3400,percent:null,top:true},130,4500);
+            ok(seen.length===2&&!seen[1].productName&&!seen[1].checked,'a later populated friend screen cannot reuse the consumed product');
+            seen.length=0;loading.reset();feed({page:'detail',name:'武陵冻梨货组',local:3146},10,0);
+            feed({page:'friend',friendName:'',price:null,percent:null,top:false},50,1500);
+            feed({page:'friend',friendName:'故渊#7741',price:3552,percent:12.9,top:true},90,13000);
+            ok(seen.length===1&&!seen[0].productName&&!seen[0].checked,'a list loading longer than the limit cannot reuse the product');
+            seen.length=0;loading.reset();feed({page:'detail',name:'武陵冻梨货组',local:3146},10,0);
+            feed({page:'friend',friendName:'',price:null,percent:null,top:false},50,1500);
+            feed({page:'unknown'},70,3000);feed({page:'friend',friendName:'故渊#7741',price:3552,percent:12.9,top:true},90,4500);
+            ok(seen.length===1&&!seen[0].productName,'unknown pages still clear the product while the friend list is loading');
+            seen.length=0;loading.reset();feed({page:'detail',name:'武陵冻梨货组',local:3146},10,0);
+            feed({page:'friend',friendName:'',price:null,percent:null,top:false},50,1500);
+            const beforeTimeout=loading.begin();loading.observe([50,50,50],13000);
+            ok(!loading.accept({page:'friend',friendName:'故渊#7741',price:3552,percent:12.9,top:true},beforeTimeout)&&seen.length===0,'loading timeout invalidates in-flight OCR carrying the old product');}
         engine.reset();shade=10;confirm(detail('商品A'));shade=50;confirm({...friend(),friendName:''});ok(!results.at(-1).checked,'missing required friend name never auto passes');
         for(const reason of ['pause','gap','layout','ended']){shade=10;confirm(detail('商品A'));engine.reset(reason);shade=80;confirm(friend());ok(!results.at(-1).checked,reason+' clears association');engine.reset();}
         engine.reset();shade=20;for(let i=0;i<7;i++)sample({...friend(),price:3300+i});ok(!results.at(-1).checked&&results.at(-1).reasons.includes('三轮识别不一致'),'three inconsistent rounds become pending');
@@ -104,6 +134,30 @@
             r.events=type=>r.diag.length?r.diag.at(-1).events.filter(e=>e.type===type).length:0;
             return r;
         }
+        {let current=detail('商品A');let reads=0;const seen=[],r=rig({readFrame:async()=>{reads++;return current;},onCandidate:c=>seen.push(c)});
+            await r.session.prepare();await r.session.start();
+            for(let i=0;i<5;i++)await r.tick(140);
+            ok(r.states.at(-1)==='等待好友价格'&&reads===2,'stable detail confirms within 700 ms with two independent OCR reads');
+            current=friend();r.paint(180);for(let i=0;i<5;i++)await r.tick(140);
+            ok(seen.length===1&&seen[0].productName==='商品A'&&seen[0].checked&&reads===4,'stable friend quote confirms within 700 ms without removing the second OCR read');
+            await r.session.dispose();}
+        {let current=detail('商品A');const seen=[],r=rig({readFrame:async()=>current,onCandidate:c=>seen.push(c)});
+            await r.session.prepare();await r.session.start();
+            for(let i=0;i<8;i++)await r.tick(260);
+            ok(r.states.at(-1)==='等待好友价格','animated-transition fixture confirms the initial product');
+            r.paint(110);await r.tick(260);r.paint(145);await r.tick(260);current=friend();r.paint(180);
+            for(let i=0;i<8;i++)await r.tick(260);
+            ok(seen.length===1&&seen[0].productName==='商品A'&&seen[0].checked,'production scheduler preserves product through multiple animation frames');
+            await r.session.dispose();}
+        {let current=detail('商品A');const seen=[],r=rig({readFrame:async(ocr,frame,layout,context)=>current.page==='friend'?{...current,top:!!context}:current,onCandidate:c=>seen.push(c)});
+            await r.session.prepare();await r.session.start();for(let i=0;i<8;i++)await r.tick(260);
+            current={...friend(),friendName:'',price:null,percent:null};r.paint(110);
+            for(let i=0;i<3;i++)await r.tick(260);
+            ok(r.diag.at(-1).currentProduct==='商品A'&&seen.length===0,'production scheduler retains product after the first empty friend-page read');
+            current=friend();r.paint(180);for(let i=0;i<8;i++)await r.tick(260);
+            ok(seen.length===1&&seen[0].productName==='商品A'&&seen[0].checked,'production scheduler preserves context when friend rows load after the title');
+            ok(r.diag.at(-1).events.some(e=>e.type==='state'&&e.currentProduct==='商品A'&&e.state.includes('加载中'))&&r.diag.at(-1).events.some(e=>e.type==='recognition'&&e.productBefore==='商品A'&&e.accepted),'diagnostics record product association while loading and when accepting a quote');
+            await r.session.dispose();}
         {const reads=[],r=rig({readFrame:()=>new Promise((res,rej)=>reads.push({res,rej}))});await r.session.prepare();await r.session.start();
             r.paint(65);for(let i=0;i<5;i++)await r.tick();ok(reads.length===1&&r.session.queueSize===1,'busy OCR queues the latest stable frame');
             r.paint(150);await r.tick();reads[0].res(detail('商品A'));await wait(0);
@@ -149,12 +203,22 @@
         const rawOcr={recognizeRegions:async(frame,regions)=>Object.fromEntries(Object.keys(regions).map(k=>[k,{text:k==='friendTitle'?'好友价格':k==='name'?'好友#1':k==='price'?'3300':'',confidence:99}]))};
         const testFrame=document.createElement('canvas');testFrame.width=1367;testFrame.height=706;
         ok(!(await GameCapture.readFrame(rawOcr,testFrame,noScroll,null)).top&&(await GameCapture.readFrame(rawOcr,testFrame,noScroll,{name:'商品A'})).top,'no-scroll mode requires fresh detail context');
+        {const calls=[],ocr={recognizeRegions:async(frame,regions)=>{calls.push(Object.keys(regions));return rawOcr.recognizeRegions(frame,regions);}};
+            const read=await GameCapture.readFrame(ocr,testFrame,noScroll,{name:'商品A'});
+            ok(read.page==='friend'&&read.price===3300&&!calls.some(keys=>keys.includes('detailTitle')),'a clear friend title avoids redundant OCR of the overlapping detail title');}
+        {const calls=[],ocr={recognizeRegions:async(frame,regions)=>{calls.push(Object.keys(regions));return Object.fromEntries(Object.keys(regions).map(k=>[k,{text:({friendTitle:'',detailTitle:'购买物资',name:'商品A',localLabel:'今日售价',local:'3000'})[k]||'',confidence:99}]));}};
+            const read=await GameCapture.readFrame(ocr,testFrame,noScroll,null);
+            ok(read.page==='detail'&&read.name==='商品A'&&read.local===3000&&calls.some(keys=>keys.includes('detailTitle')),'unreadable first title falls back to the calibrated detail title');}
 
         // Integration uses the actual Vue page, formal import and persistent quotation editing.
         localStorage.clear();localStorage.setItem('products',JSON.stringify(products));localStorage.setItem('friends',JSON.stringify([{name:'游戏采集',discounts:{}}]));
         const frame=document.getElementById('app');await new Promise(r=>{frame.onload=r;frame.src='index.html';});
         for(let i=0;i<200&&!frame.contentDocument.getElementById('app').__vue_app__;i++)await wait(100);
         const win=frame.contentWindow,vm=frame.contentDocument.getElementById('app').__vue_app__._instance.proxy;
+        ok(win.GameCaptureModel.VERSION===win.GameCapture.VERSION&&['model','controller','vue'].every(name=>{
+            const script=frame.contentDocument.querySelector('script[src*="/capture/'+name+'.js"]');
+            return script&&new URL(script.src).searchParams.get('v')===win.GameCapture.VERSION;
+        }),'application loads all capture components with the same cache-busting version');
         let callbacks,uiDisposed=0,savedLayout;
         win.GameCapture.createSession=opts=>{callbacks=opts;return {supportError:()=>'',prepare:async()=>{},start:async()=>{},setDiagnosticsOnly:()=>{},pause:()=>{},resume:()=>{},freeze:()=>testFrame,setLayout:l=>{savedLayout=l;},stop:async()=>{opts.onStopped();},dispose:async()=>{uiDisposed++;}};};
         await vm.openCaptureDialog();await vm.$nextTick();ok(!!frame.contentDocument.querySelector('.capture-dialog'),'capture panel renders');
